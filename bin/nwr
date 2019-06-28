@@ -1,0 +1,132 @@
+#!/usr/bin/env python3
+import os, sys, subprocess
+
+class Struct(object):
+	pass
+
+REQUIRED = object()
+class StrictOptionParser(object):
+	def __init__(self, parent=None, names=None):
+		self.parent = parent
+		self.names = names
+		self.commands = []
+		self.command_map = []
+		self.options = []
+		self.posargs = {}
+
+	def add_subcommand(self, *names):
+		sub = StrictOptionParser(self, names=names)
+		self.command_map[name] = sub
+		self.commands.append(sub)
+		return sub
+
+	def add_option(self, *a, **k):
+		self.options.append((a,k))
+		return self.p.add_option(*a, **k)
+
+	def add_posarg(self, name):
+		self.posargs.append(name)
+
+	def finish(self):
+		p = optparse.OptionParser(usage='TODO')
+		p.disable_interspersed_args()
+		for (a,k) in self.options:
+			p.add_option(*a, **k)
+		return p
+
+	def parse_posargs(self, dest, args):
+		result = Struct()
+		remaining = args[:]
+		for name in self.posargs:
+			try:
+				value = remaining.pop(0)
+				if hasattr(result, name) and getattr(result, name) is not None:
+					assert False, "%s supplied via option and arg"
+				setattr(result, name, value)
+			except IndexError:
+				value = None
+				# don't override existing if no arg given
+				if not hasattr(result, name):
+					setattr(result, name, value)
+		return result
+
+	def parse(self, args):
+		p = self.finish()
+		opts, args = self.p.parse_args(args)
+		if self.posargs:
+			# posargs don't have subcommands
+			self.parse_posargs(opts, args)
+		else:
+			if args and args[0] in self.command_map:
+				# parse sub-command:
+				subcommand = self.command_map[args[0]]
+				return (opts, subcommand, subcommand.parse(args[1:]))
+			else:
+				assert not args, "no more args expected"
+				return opts
+
+def main():
+	p = StrictOptionParser()
+	p.add_option('-f', '--file', help='default: nix/wrangle.json')
+
+	p_add = p.add_subcommand('add')
+	p_add.add_posarg('source')
+	p_add.add_argument('version')
+
+	p_update = p.add_subcommand('update')
+	p_update.add_option('--source', help='modify source')
+	p_update.add_argument('name')
+	p_update.add_argument('version')
+
+	for dest in [p_add, p_update]:
+		dest.add_option('--version-guess', help='guess version from ref (git only)')
+		dest.add_option('--version-commit', help='use commit as version (git only)')
+		dest.add_option('--version-file', help='use version from embedded VERSION file (git only)')
+		dest.add_option('--type', help='default: infer') # default: infer
+		dest.add_option('--name', help='default: last component of source')
+		dest.add_option('--import', help='path to .nix file within source')
+		dest.add_option('--overlay-path', action='append', default=[], help='add an attr path to overlay (for use by nwr overlay / exec)')
+
+	p_rm = p.add_subcommand('rm')
+	p_bootstrap = p.add_subcommand('bootstrap')
+	p_overlay = p.add_subcommand('overlay')
+	p_exec = p.add_subcommand('exec')
+
+	parsed = p.parse_args(sys.argv[1:])
+	print(repr(parsed))
+	(sub, cmd, sub_args) = parsed
+	assert cmd is not None, "subcommand required"
+
+	if cmd is p_add:
+		(cmd_opts, _, args) = sub_args
+		package, ref = args
+
+	else:
+		assert False, "unknown subcommand"
+
+# Data layout:
+#
+# {
+#   gup: {
+#     src = ["fetchFromGitHub", { repo; owner; sha256; } ],
+#     # type derived from src[0], repo + owner derived from src[1]
+#     ref: "master";
+#     version: ...,
+#     nix: "nix/default.nix",
+#     TODO: local? put it in nwr-local.json
+#     overlayAttrs: [ "gup" ], # implied
+#   },
+#   gup: {
+#     src = ["fetchFromGitHub", { repo; owner; sha256; } ],
+#   },
+#   {
+#     src = ["fetchurl", { url; sha256; } ],
+#     version: "1.2.3";
+#     url: "http://exmple.com/sw/v{version}/archive.tgz";
+#
+#     nix: "nix/default.nix",
+#     TODO: local? put it in nwr-local.json
+#     overlayAttrs: [ "gup" ], # implied
+#   }
+#
+

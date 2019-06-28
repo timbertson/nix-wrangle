@@ -1,0 +1,53 @@
+#!/usr/bin/env python3
+
+import os, sys, subprocess, json
+with open('nix/wrangle.json') as f:
+	sources = json.load(f)['sources']
+
+def fetch_expr(spec, nixpkgs_expr):
+	print(repr(spec))
+	fetcher, args = spec['source']
+	def attr(name):
+		return '  %s = "%s";' % (name, args[name])
+
+	src = None
+	if fetcher == 'url':
+		src = [
+			'builtins.fetchTarball {',
+			attr(url),
+			attr('sha256'),
+			'}',
+		]
+	elif fetcher == 'github':
+		src = [
+			'%s.fetchFromGitHub {' % nixpkgs_expr,
+			attr('owner'),
+			attr('repo'),
+			attr('rev'),
+			attr('sha256'),
+			'}',
+		]
+	else:
+		raise AssertionError("Unsupported fetcher: %s" % (fetcher,))
+
+	return '\n'.join(src)
+
+nixpkgs = sources.get('nixpkgs')
+if nixpkgs is None:
+	nixpkgs = 'import <nixpkgs> {}'
+else:
+	nixpkgs = fetch_expr(nixpkgs, nixpkgs_expr = '(import <nixpkgs> {})')
+
+wrangle = sources['wrangle'] # TODO: provide a default?
+wrangle = fetch_expr(wrangle, nixpkgs_expr = 'pkgs')
+
+contents = '''let
+defaultPkgs = %(nixpkgs)s;
+defaultWrangle = pkgs: { api = pkgs.callPackage "${%(wrangle)s}/nix/api.nix"; };
+in
+{ pkgs ? defaultPkgs, nix-wrangle ? defaultWrangle pkgs }:
+(nix-wrangle.api { inherit pkgs; }).inject ./nix
+''' % { 'nixpkgs': nixpkgs, 'wrangle': wrangle }
+print(contents)
+with open('default.nix', 'w') as f:
+	f.write(contents)

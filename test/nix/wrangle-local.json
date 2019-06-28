@@ -1,0 +1,28 @@
+{ "wrangle": { "apiversion": 1 }
+, "sources":
+	{ "gup":
+		{ "fetch":
+			[ "git-local"
+			, { "path": "/home/tim/dev/ocaml/gup"
+				, "unpack": false
+				, "ref": "HEAD"
+				}
+			]
+		, "unpack": true
+		, "version": "HEAD"
+		, "nix": "nix/gup-python.nix"
+		}
+	, "nix-source-automation":
+		{ "fetch":
+			[ "git-local"
+			, { "path": "/home/tim/dev/nix/nix-source-automation"
+				, "unpack": false
+				, "ref": "HEAD"
+				}
+			]
+		, "unpack": true
+		, "version": "HEAD"
+		, "nix": "nix/"
+		}
+	}
+}

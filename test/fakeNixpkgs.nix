@@ -1,0 +1,4 @@
+{ overlays }:
+{
+	testMessage = "fake nixpkgs!";
+}

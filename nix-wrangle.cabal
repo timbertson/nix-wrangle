@@ -1,4 +1,4 @@
-cabal-version: 1.12
+cabal-version: 2.0
 
 name:           nix-wrangle
 version:        0.0.0
@@ -28,7 +28,7 @@ executable nix-wrangle
     , filepath
     , github
     , hashable
-    , hnix
+    , hnix ^>= 0.6.1
     , mtl
     , optparse-applicative
     , process

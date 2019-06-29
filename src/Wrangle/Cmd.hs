@@ -247,14 +247,14 @@ parseCmdInit =
 cmdInit :: IO ()
 cmdInit = do
   cmdAdd (Right (PackageName "nix-wrangle", spec)) commonOpts
+  updateDefaultNix defaultNixOptsDefault
   where
-    -- -- TODO: if no sources exist, run init?
-    commonOpts = CommonOpts { sources = [ Source.DefaultSource ] }
+    commonOpts = CommonOpts { sources = [] }
     spec = Source.PackageSpec {
       Source.sourceSpec = Source.Github Source.GithubSpec {
         Source.ghOwner = "timbertson",
         Source.ghRepo = "nix-wrangle",
-        Source.ghRef = Source.Template "master" -- TODO: stable?
+        Source.ghRef = Source.Template "v1"
       },
       Source.fetchAttrs = HMap.empty,
       Source.packageAttrs = HMap.empty
@@ -285,14 +285,15 @@ cmdAdd addOpt opts =
     (name, inputSpec) <- liftEither addOpt
     putStrLn $ "Adding " <> show name <> " // " <> show inputSpec
     extantSourceFile <- listToMaybe <$> (Source.configuredSources $ sources opts)
+    debugLn $ "extantSourceFile: " <> show extantSourceFile
     let loadedSourceFile :: Maybe (IO (Source.SourceFile, Maybe Source.Packages)) = loadSource' <$> extantSourceFile
     source :: (Source.SourceFile, Maybe Source.Packages) <- fromMaybe (return (Source.DefaultSource, Nothing)) loadedSourceFile
+    debugLn $ "source: " <> show source
     let (sourceFile, inputSource) = source
     let baseSource = fromMaybe (Source.emptyPackages) inputSource
     spec <- Fetch.prefetch name inputSpec
     let modifiedSource = Source.add baseSource name spec
     Source.writeSourceFile sourceFile modifiedSource
-    putStrLn $ "Updated " <> (Source.pathOfSource sourceFile)
   where
     loadSource' :: Source.SourceFile -> IO (Source.SourceFile, Maybe Source.Packages)
     -- TODO: arrows?

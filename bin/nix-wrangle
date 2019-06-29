@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -eu
+here="$(dirname "$0")"
+exe="$(find "$here/../dist-newstyle" -type f -name nix-wrangle)"
+[ -n "$exe" ]
+set -x
+exec "$exe" "$@"

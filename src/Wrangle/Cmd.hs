@@ -65,6 +65,10 @@ default.nix: concrete derivation: bakes in version of nixpkgs, self & wrangle
 nix/wrangle.json: public deps
 nix/wrangle-local.json: local deps
 
+TODO:
+- allow local overlays on global sources
+  e.g. prefetch against a local git repo but publish with the public URL
+- splice: specify output path
 
 Use cases:
  - nix-wrangle splice: splice `self` into derivation base, to be used upstream (i.e. in nixpkgs)
@@ -84,14 +88,22 @@ newtype CommonOpts = CommonOpts {
 
 parseCommon :: Opts.Parser CommonOpts
 parseCommon =
-  setSources . NonEmpty.nonEmpty <$> parseSourceOptions
+  build <$> parseSources <*> parseLocal <*> parsePublic
   where
-    setSources s = CommonOpts { sources = s }
-    parseSourceOptions = many $ Source.NamedSource <$> Opts.strOption
+    build src a b = CommonOpts { sources = NonEmpty.nonEmpty (src <> a <> b) }
+    parseSources = many $ Source.NamedSource <$> Opts.strOption
       ( Opts.long "source" <>
         Opts.short 's' <>
         Opts.metavar "SOURCE.json" <>
         Opts.help "Specify wrangle.json file to operate on"
+      )
+    parseLocal = Opts.flag [] [Source.LocalSource]
+      ( Opts.long "local" <>
+        Opts.help "use nix/wrangle-local.json"
+      )
+    parsePublic = Opts.flag [] [Source.DefaultSource]
+      ( Opts.long "public" <>
+        Opts.help "use nix/wrangle.json"
       )
 
 parseName :: Opts.Parser Source.PackageName
@@ -472,10 +484,3 @@ updateDefaultNix (DefaultNixOpts { force }) = do
       else
         return True
 
--- TODO:
--- - allow local overlays on global sources
---   e.g. prefetch against a local git repo but publish with the public URL
---
--- - init, and run auto-init / update whenever something changes
--- - during build, embed self.json so we can bootstrap this version? Or just use master.
--- - splice: specify output path

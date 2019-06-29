@@ -17,8 +17,10 @@ import Control.Monad.Except (throwError)
 -- import Control.Exception (throw, AssertionFailed(..))
 -- import qualified Data.HashMap.Strict as HMap
 import Data.Char (toUpper)
-import Data.Maybe (listToMaybe, fromMaybe)
+import Data.Maybe (fromMaybe)
 import Data.List (partition)
+import Data.List.NonEmpty (NonEmpty(..))
+import qualified Data.List.NonEmpty as NonEmpty
 import Wrangle.Source (PackageName(..))
 import qualified Data.HashMap.Strict as HMap
 import qualified Data.Text as T
@@ -77,12 +79,12 @@ Use cases:
  -}
 
 newtype CommonOpts = CommonOpts {
-  sources :: [Source.SourceFile] -- TODO Maybe [...]
+  sources :: Maybe (NonEmpty Source.SourceFile)
 } deriving newtype Show
 
 parseCommon :: Opts.Parser CommonOpts
 parseCommon =
-  setSources <$> parseSourceOptions
+  setSources . NonEmpty.nonEmpty <$> parseSourceOptions
   where
     setSources s = CommonOpts { sources = s }
     parseSourceOptions = many $ Source.NamedSource <$> Opts.strOption
@@ -221,12 +223,17 @@ parseCmdShow =
 cmdShow :: CommonOpts -> IO ()
 cmdShow opts =
   do
-    sourceFiles <- Source.configuredSources $ sources opts
+    sourceFiles <- requireConfiguredSources $ sources opts
     sources <- Source.loadSources sourceFiles
     putStrLn $ Source.encodePrettyString sources
 
+requireConfiguredSources :: Maybe (NonEmpty Source.SourceFile) -> IO (NonEmpty Source.SourceFile)
+requireConfiguredSources sources =
+  Source.configuredSources sources >>=
+    (liftMaybe (AppError "No wrangle JSON files found"))
+
 -------------------------------------------------------------------------------
--- Ini
+-- Init
 -------------------------------------------------------------------------------
 parseCmdInit :: Opts.ParserInfo (IO ())
 parseCmdInit =
@@ -249,7 +256,7 @@ cmdInit = do
   cmdAdd (Right (PackageName "nix-wrangle", spec)) commonOpts
   updateDefaultNix defaultNixOptsDefault
   where
-    commonOpts = CommonOpts { sources = [] }
+    commonOpts = CommonOpts { sources = Nothing }
     spec = Source.PackageSpec {
       Source.sourceSpec = Source.Github Source.GithubSpec {
         Source.ghOwner = "timbertson",
@@ -284,9 +291,10 @@ cmdAdd addOpt opts =
   do
     (name, inputSpec) <- liftEither addOpt
     putStrLn $ "Adding " <> show name <> " // " <> show inputSpec
-    extantSourceFile <- listToMaybe <$> (Source.configuredSources $ sources opts)
+    configuredSources <- Source.configuredSources $ sources opts
+    let extantSourceFile = NonEmpty.head <$> configuredSources
     debugLn $ "extantSourceFile: " <> show extantSourceFile
-    let loadedSourceFile :: Maybe (IO (Source.SourceFile, Maybe Source.Packages)) = loadSource' <$> extantSourceFile
+    let loadedSourceFile = loadSource' <$> extantSourceFile
     source :: (Source.SourceFile, Maybe Source.Packages) <- fromMaybe (return (Source.DefaultSource, Nothing)) loadedSourceFile
     debugLn $ "source: " <> show source
     let (sourceFile, inputSource) = source
@@ -322,12 +330,12 @@ parseCmdUpdate =
 
 cmdUpdate :: Maybe [PackageName] -> Source.StringMap -> CommonOpts -> IO ()
 cmdUpdate packageNamesOpt updateAttrs opts = do
-  sourceFiles <- Source.configuredSources $ sources opts
-  sources <- sequence $ map loadSource sourceFiles
-  checkMissingKeys (map snd sources)
-  sequence_ $ map updateSources sources
+  sourceFiles <- requireConfiguredSources $ sources opts
+  sources <- sequence $ loadSource <$> sourceFiles
+  checkMissingKeys (snd <$> sources)
+  sequence_ $ updateSources <$> sources
   where
-    checkMissingKeys :: [Source.Packages] -> IO ()
+    checkMissingKeys :: NonEmpty Source.Packages -> IO ()
     checkMissingKeys sources = case missingKeys of
       [] -> return ()
       _ -> fail $ "No such packages: " <> show missingKeys
@@ -383,7 +391,7 @@ cmdSplice opts path =
     let expr = Splice.parse fileContents
     expr <- Splice.getExn expr
     -- putStrLn $ show $ expr
-    sourceFiles <- Source.configuredSources $ sources opts
+    sourceFiles <- requireConfiguredSources $ sources opts
     sources <- Source.merge <$> Source.loadSources sourceFiles
     self <- liftEither $ Source.lookup (PackageName "self") sources
     let existingSrcSpans = Splice.extractSourceLocs expr

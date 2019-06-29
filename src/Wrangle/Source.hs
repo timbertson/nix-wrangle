@@ -18,6 +18,8 @@ import Data.Hashable (Hashable)
 -- import GHC.Exts (toList)
 import System.FilePath ((</>))
 import Wrangle.Util
+import Data.List.NonEmpty (NonEmpty(..))
+import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Encode.Pretty as AesonPretty
 import qualified Data.ByteString as B
@@ -305,18 +307,21 @@ loadSourceFile source = do
       "This file should be a JSON map with toplevel objects `sources` and `wrangle`.",
       reason]
 
-loadSources :: [SourceFile] -> IO [Packages]
+loadSources :: NonEmpty SourceFile -> IO (NonEmpty Packages)
 loadSources sources = do
   debugLn $ "Loading sources: " ++ (show sources)
   traverse loadSourceFile sources
 
-merge :: [Packages] -> Packages
+merge :: NonEmpty Packages -> Packages
 merge packages = do
   -- TODO check order
-  Packages $ foldr HMap.union HMap.empty (map unPackages packages)
+  Packages $ foldr HMap.union HMap.empty (unPackages <$> packages)
 
 writeSourceFile :: SourceFile -> Packages -> IO ()
-writeSourceFile sourceFile = encodeFile (pathOfSource sourceFile)
+writeSourceFile sourceFile packages = do
+  putStrLn $ "Writing sources: " ++ sourcePath
+  encodeFile sourcePath packages
+    where sourcePath = pathOfSource sourceFile
 
 newtype NotFound = NotFound (String, [String])
 instance Show NotFound where
@@ -338,13 +343,14 @@ member = (flip HMap.member) . unPackages
 defaultSourceFileCandidates :: [SourceFile]
 defaultSourceFileCandidates = [ DefaultSource, LocalSource ]
 
-detectDefaultSources :: IO [SourceFile]
-detectDefaultSources =
-  filterM (Dir.doesFileExist . pathOfSource) defaultSourceFileCandidates
+detectDefaultSources :: IO (Maybe (NonEmpty SourceFile))
+detectDefaultSources = tap log $ NonEmpty.nonEmpty <$> fileList where
+  log sources = debugLn $ "Detected default sources:" <> show sources
+  fileList = filterM (Dir.doesFileExist . pathOfSource) defaultSourceFileCandidates
 
-configuredSources :: [SourceFile] -> IO [SourceFile]
-configuredSources [] = detectDefaultSources
-configuredSources explicitSources = return explicitSources
+configuredSources :: Maybe (NonEmpty SourceFile) -> IO (Maybe (NonEmpty SourceFile))
+configuredSources Nothing = detectDefaultSources
+configuredSources explicitSources@(Just _) = return explicitSources
 
 newtype PackageName = PackageName { unPackageName :: String }
   deriving newtype (Eq, Hashable, FromJSONKey, ToJSONKey, Show)

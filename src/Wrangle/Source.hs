@@ -11,6 +11,7 @@ import Prelude hiding (error)
 import Control.Monad
 import Control.Error.Safe (justErr)
 import Control.Exception (Exception)
+import Data.Bifoldable (bifoldMap)
 import Control.Applicative ((<|>))
 import Data.Aeson hiding (eitherDecodeFileStrict, encodeFile)
 import Data.Aeson.Types (typeMismatch, Parser)
@@ -30,7 +31,6 @@ import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.Encoding as TLE
 import qualified Options.Applicative as Opts
 import qualified System.Directory as Dir
-import qualified System.FilePath.Posix as PosixPath
 
 {-
  - Terminology:
@@ -78,10 +78,50 @@ newtype Sha256 = Sha256 String deriving (Show, Eq, FromJSON, ToJSON)
 instance AsString Sha256 where
   asString (Sha256 s) = s
 
-data FetcherName = FetcherName {
-  nixName :: String,
-  wrangleName :: String
-} deriving (Show, Eq)
+data FetchType =
+  FetchGithub
+  | FetchGit
+  | FetchUrl UrlFetchType
+  | FetchGitLocal
+  | FetchPath
+
+parseFetchType :: String -> Either String FetchType
+parseFetchType s = case s of
+  "github" -> Right FetchGithub
+  "url" -> Right $ FetchUrl FetchArchive
+  "file" -> Right $ FetchUrl FetchFile
+  "path" -> Right FetchPath
+  "git-local" -> Right FetchGitLocal
+  t -> Left $ "Unsupported type: " <> (show t)
+
+fetchType :: SourceSpec -> FetchType
+fetchType spec = case spec of
+  (Github _) -> FetchGithub
+  (Url (UrlSpec { urlType })) -> FetchUrl urlType
+  (Git _) -> FetchGit
+  (GitLocal _) -> FetchGitLocal
+  (Path _) -> FetchPath
+
+fetcherNameNix :: FetchType -> Either AppError String
+fetcherNameNix f = case f of
+    FetchGithub -> Right "fetchFromGitHub"
+    FetchGit -> Right "fetchgit"
+    (FetchUrl FetchArchive) ->  Right "fetchzip"
+    (FetchUrl FetchFile) ->  Right "fetchurl"
+    -- These two don't have a nix fetcher, which means they
+    -- aren't supported in `splice`, but they also require
+    -- no prefetching
+    FetchGitLocal -> err
+    FetchPath -> err
+    where err = Left $ AppError $ "No plain-nix fetcher for type '"<>fetcherNameWrangle f<>"'"
+
+fetcherNameWrangle :: FetchType -> String
+fetcherNameWrangle f = case f of
+    FetchGithub -> "github"
+    FetchGit -> "git"
+    FetchGitLocal -> "git-local"
+    FetchPath -> "path"
+    (FetchUrl typ) ->  asString typ
 
 data GithubSpec = GithubSpec {
   ghOwner :: String,
@@ -128,7 +168,6 @@ data GitSpec = GitSpec {
 instance ToStringPairs GitSpec where
   toStringPairs GitSpec { gitUrl, gitRef } =
     [
-      -- TODO: deal with urlType?
       ("url", gitUrl),
       ("ref", asString gitRef)
     ]
@@ -138,18 +177,9 @@ data LocalPath
   | RelativePath FilePath
    deriving (Show, Eq)
 
-instance FromJSON LocalPath where
-  parseJSON (String text) = pure $
-    if PosixPath.isAbsolute p then FullPath p else RelativePath p
-    where p = T.unpack text
-  parseJSON other = typeMismatch "string" other
-
-instance AsString LocalPath where
-  asString (FullPath s) = s
-  asString (RelativePath s) = s
-
-instance ToJSON LocalPath where
-  toJSON p = toJSON (asString p)
+instance ToStringPairs LocalPath where
+  toStringPairs (FullPath p) = [("path", p)]
+  toStringPairs (RelativePath p) = [("relativePath", p)]
 
 data GitLocalSpec = GitLocalSpec {
   glPath :: LocalPath,
@@ -158,16 +188,14 @@ data GitLocalSpec = GitLocalSpec {
 
 instance ToStringPairs GitLocalSpec where
   toStringPairs GitLocalSpec { glPath, glRef } =
-    [
-      ("path", asString glPath),
-      ("ref", asString glRef)
-    ]
+    (toStringPairs glPath) <> [("ref", asString glRef)]
 
 data SourceSpec
   = Github GithubSpec
   | Url UrlSpec
   | Git GitSpec
   | GitLocal GitLocalSpec
+  | Path LocalPath
   deriving (Show, Eq)
 
 instance ToStringPairs SourceSpec where
@@ -175,41 +203,34 @@ instance ToStringPairs SourceSpec where
   toStringPairs (Url f) = toStringPairs f
   toStringPairs (Git f) = toStringPairs f
   toStringPairs (GitLocal f) = toStringPairs f
+  toStringPairs (Path f) = toStringPairs f
 
--- instance FromJSON SourceSpec where
---   parseJSON = withObject "SourceSpec" $ parseSourceSpecObject
---
--- TODO return (SourceSpec, remainingAttrs)
+-- TODO return (SourceSpec, remainingAttrs)?
 parseSourceSpecObject :: Value -> Object -> Parser SourceSpec
-parseSourceSpecObject fetcher attrs = parseUrl <|> parseExplicit
+parseSourceSpecObject fetcher attrs = parseFetcher fetcher >>= parseSpec
   where
-    parseUrl = (buildUrl <$> (parseJSON fetcher :: Parser UrlFetchType) <*> url)
-    parseExplicit = case fetcher of
-      "github" ->
+    parseFetcher :: Value -> Parser FetchType
+    parseFetcher json = parseJSON json >>= bifoldMap invalid pure . parseFetchType
+    parseSpec :: FetchType -> Parser SourceSpec
+    parseSpec fetcher = case fetcher of
+      FetchGithub ->
         build <$> owner <*> repo <*> ref where
           build ghOwner  ghRepo  ghRef = Github $ GithubSpec {
                 ghOwner, ghRepo, ghRef }
-      "git" -> build <$> url <*> ref where
+      FetchGit -> build <$> url <*> ref where
         build gitUrl gitRef = Git $ GitSpec { gitUrl, gitRef }
-      "git-local" ->
+      FetchGitLocal ->
         build <$> path <*> ref where
           build glPath glRef = GitLocal $ GitLocalSpec { glPath, glRef }
-      _ ->  invalid attrs
+      FetchPath -> Path <$> path
+      (FetchUrl t) -> buildUrl t <$> url
     owner = attrs .: "owner"
     repo = attrs .: "repo"
     url = attrs .: "url"
-    path = attrs .: "path"
+    path = (FullPath <$> attrs .: "path") <|> (RelativePath <$> attrs .: "relativePath")
     ref :: Parser Template = attrs .: "ref"
     buildUrl urlType url = Url $ UrlSpec { urlType, url = Template url }
     invalid v = fail $ "Unable to parse SourceSpec from: " <> (encodePrettyString v)
-
-fetcherName :: SourceSpec -> FetcherName
-fetcherName spec = FetcherName { nixName, wrangleName } where
-  (nixName, wrangleName) = case spec of
-    (Github _) ->   ("fetchFromGitHub", "github")
-    (Git _) ->      ("fetchgit", "git")
-    (GitLocal _) -> ("exportGitLocal", "git-local")
-    (Url fetch) ->  ("fetchurl", asString $ urlType fetch)
 
 stringMapOfJson :: Aeson.Object -> Parser (HMap.HashMap String String)
 stringMapOfJson args = HMap.fromList <$> (mapM convertArg $ HMap.toList args)
@@ -243,11 +264,10 @@ instance FromJSON PackageSpec where
 instance ToJSON PackageSpec where
   toJSON PackageSpec { sourceSpec, fetchAttrs, packageAttrs } =
     toJSON
-      . HMap.insert (T.unpack typeKeyJSON) (toJSON . wrangleName . fetcherName $ sourceSpec)
+      . HMap.insert (T.unpack typeKeyJSON) (toJSON . fetcherNameWrangle . fetchType $ sourceSpec)
       . HMap.insert (T.unpack fetchKeyJSON) (toJSON fetchAttrs)
       $ (HMap.map toJSON (packageAttrs <> HMap.fromList (toStringPairs sourceSpec)))
 
--- TODO rename Packages
 newtype Packages = Packages
   { unPackages :: HMap.HashMap PackageName PackageSpec }
   deriving newtype (Show)

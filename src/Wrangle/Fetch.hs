@@ -49,7 +49,7 @@ prefetch name pkg = do
   render = renderTemplate (packageAttrs pkg)
 
   addDigest :: [String] -> [(String,String)] -> IO [(String,String)]
-  addDigest path attrs = prefix <$> (log $ prefetchSha256 (fetcherName src) attrs) where
+  addDigest path attrs = prefix <$> (log $ prefetchSha256 (fetchType src) attrs) where
     prefix d = ("sha256", asString d) : attrs
     log = tap (\d -> do
       infoLn $ "Resolved " <>
@@ -74,10 +74,13 @@ prefetch name pkg = do
     commit <- resolveGitRef gitUrl ref
     addDigest [ref, asString commit] [("url", gitUrl), ("rev", asString commit)]
 
+  -- *Local require no prefetching:
   resolveAttrs (GitLocal (GitLocalSpec { glPath, glRef })) = do
-    -- no prefetching necessary!
     ref <- liftEither $ render glRef
-    return [("ref", ref), ("path", asString glPath)]
+    return $ [("ref", ref)] <> toStringPairs glPath
+
+  resolveAttrs (Path p) = do
+    return $ toStringPairs p
 
 resolveGithubRef :: GithubSpec -> String -> IO GitRevision
 resolveGithubRef (GithubSpec { ghRepo, ghOwner }) ref = do
@@ -109,24 +112,34 @@ shaLen = 52
 dummySHA256 = concat $ replicate shaLen "0"
 
 -- This supports arbitrary prefetching without worrying about nix-prefetch-*.
--- It's slightly inefficient since it retults in two downloads of a file,
+-- It's slightly inefficient since it results in two downloads of a file,
 -- but it's very reliable regardless of fetch method.
-prefetchSha256 :: FetcherName -> [(String,String)] -> IO Sha256
-prefetchSha256 fetcher attrs = do
-  debugLn $ "prefetching "<>(wrangleName fetcher) <> " digest"
-  debugLn $ "+ " <> (show $ exe : args)
-  P.withCreateProcess processSpec parseErr
+prefetchSha256 :: FetchType -> [(String,String)] -> IO Sha256
+prefetchSha256 fetchType attrs = do
+  let wrangleFetcher = fetcherNameWrangle fetchType
+  debugLn $ "prefetching "<> wrangleFetcher <> " digest"
+  nixFetcher <- liftEither $ fetcherNameNix fetchType
+  runCmd nixFetcher
   where
-    fetchExpr = intercalate " " [
-      "{fetchJSON}:",
-      "(import <nixpkgs> {})." <> (nixName fetcher),
-      "(builtins.fromJSON fetchJSON)"]
-    fetchJSON = encodeOnelineString . toJSON . HMap.fromList $ ("sha256", dummySHA256) : attrs
-    exe = "nix-build"
-    args = [
-      "--no-out-link",
-      "--argstr", "fetchJSON", fetchJSON,
-      "--expr", fetchExpr]
+    runCmd nixFetcher = do
+      debugLn $ "+ " <> (show $ exe : args)
+      P.withCreateProcess processSpec parseErr
+      where
+      fetchExpr = intercalate " " [
+        "{fetchJSON}:",
+        "(import <nixpkgs> {})." <> nixFetcher,
+        "(builtins.fromJSON fetchJSON)"]
+      fetchJSON = encodeOnelineString . toJSON . HMap.fromList $ ("sha256", dummySHA256) : attrs
+      exe = "nix-build"
+      args = [
+        "--no-out-link",
+        "--argstr", "fetchJSON", fetchJSON,
+        "--expr", fetchExpr]
+
+      processSpec = (P.proc exe args) {
+        P.std_out = P.NoStream,
+        P.std_in = P.NoStream,
+        P.std_err = P.CreatePipe }
 
     parseErr _ _ maybeErr proc = do
       errHandle <- liftMaybe (toException $ AppError "stderr handle is null") maybeErr
@@ -135,10 +148,6 @@ prefetchSha256 fetcher attrs = do
       _ <- P.waitForProcess proc
       liftEither $ extractExpectedDigest errText
 
-    processSpec = (P.proc exe args) {
-      P.std_out = P.NoStream,
-      P.std_in = P.NoStream,
-      P.std_err = P.CreatePipe }
 
 -- Thanks https://github.com/seppeljordan/nix-prefetch-github/blob/cd9708fcdf033874451a879ac5fe68d7df930b7e/src/nix_prefetch_github/__init__.py#L124
 -- For the future, note SRI: https://github.com/NixOS/nix/commit/6024dc1d97212130c19d3ff5ce6b1d102837eee6

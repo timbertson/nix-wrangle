@@ -54,10 +54,12 @@ stripAnnotation :: NExprLoc -> NExpr
 stripAnnotation = Expr.stripAnnotation
 pretty = Pretty.prettyNix
 
-nixOfSrc :: Source.PackageSpec -> (NExpr, NExpr)
-nixOfSrc src = (Fix . NSym . T.pack $ Source.nixName fetcher, nixAttrs fetchAttrs)
+nixFetcherName = Source.fetcherNameNix . Source.fetchType . Source.sourceSpec
+
+nixOfSrc :: Source.PackageSpec -> Either AppError (NExpr, NExpr)
+nixOfSrc src = build <$> nixFetcherName src
   where
-    fetcher = Source.fetcherName $ Source.sourceSpec src
+    build nixFetcher = (Fix . NSym . T.pack $ nixFetcher, nixAttrs fetchAttrs)
     fetchAttrs = HMap.toList $ Source.fetchAttrs src
     var :: String -> NAttrPath NExpr
     var s = (StaticKey (T.pack s)) :| []
@@ -66,9 +68,9 @@ nixOfSrc src = (Fix . NSym . T.pack $ Source.nixName fetcher, nixAttrs fetchAttr
     strBinding :: (String, String) -> Binding NExpr
     strBinding (key, val) = NamedVar (var key) (Shorthands.mkStr (T.pack val)) nullPos
 
-replaceSourceLoc :: T.Text -> Source.PackageSpec -> (Maybe (Fix NExprF), SrcSpan) -> T.Text
-replaceSourceLoc orig src (originalFetcherFn, span) =
-  T.unlines $
+replaceSourceLoc :: T.Text -> Source.PackageSpec -> (Maybe (Fix NExprF), SrcSpan) -> Either AppError T.Text
+replaceSourceLoc orig src (originalFetcherFn, span) = render <$> nixOfSrc src where
+  render (defaultFetcherFn, fetcherArgs) = T.unlines $
     (take (startLine-1) origLines)
       ++ [
         partialStart <>
@@ -77,7 +79,7 @@ replaceSourceLoc orig src (originalFetcherFn, span) =
         -- (T.pack $ show $ spanEnd span) <> ">>>" <>
         partialEnd
       ] ++ (drop (endLine) origLines)
-  where
+    where
     origLines = T.lines orig
     megaparsecTabWidth = unPos Megaparsec.defaultTabWidth
     nixIndentWidth = 2 -- hardcoded in hnix
@@ -104,7 +106,6 @@ replaceSourceLoc orig src (originalFetcherFn, span) =
     endLine = (unPos . sourceLine . spanEnd) span
     endCol = (unPos . sourceColumn . spanEnd) span
 
-    (defaultFetcherFn, fetcherArgs) = nixOfSrc src
     -- TODO: warn if `originalFetcherFn` name differs meaningfully from `defaultFetcherFn`
     -- (e.g. pkgs.fetchurl should be fine for fetchurl, but not fetchgit)
     srcExpr = Fix $ NBinary NApp (fromMaybe (defaultFetcherFn) originalFetcherFn) fetcherArgs

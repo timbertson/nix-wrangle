@@ -13,29 +13,30 @@ let
 
 	# exposed for testing
 	internal = with api; rec {
-		makeFetchers = { path }: {
-			# TODO harmonize with impl
+		makeFetchers = { path }:
+			let withRelativePath = fn: args:
+				# inject support for `relativePath` as long as
+				# we were invoked with a base path
+				let
+					fullPath = relativePath: (
+						if path == null
+							then abort "relativePath only supported when using `inject` with a path"
+							else "${path}/${relativePath}"
+					);
+
+					finalArgs = if args ? relativePath
+						then { path = fullPath args.relativePath; } //
+							(filterAttrs (n: v: n != "relativePath") args)
+						else args;
+					;
+				in
+				fn finalArgs;
+			in {
 			github = fetchFromGitHub;
 			url = fetchurl;
 			git = fetchgit;
-			git-local = args:
-			let
-				# inject support for `relativePath` as long as
-				# we were invoked with a base path
-				fullPath = relativePath: (
-					if path == null
-						then abort "relativePath only supported when using `inject` with a path"
-						else "${settings.path}/${relativePath}"
-				);
-
-				finalArgs = if args ? relativePath
-					then { path = fullPath args.relativePath; } //
-						(filterAttrs (n: v: n != "relativePath") args)
-					else args;
-				in
-				exportLocalGit finalArgs;
-
-			path = ({ path }: path);
+			git-local = withRelativePath exportLocalGit;
+			path = withRelativePath ({ path }: path);
 		};
 
 		implAttrPaths = node: map (splitString ".") (node.attrs.attrPaths or [node.name]);

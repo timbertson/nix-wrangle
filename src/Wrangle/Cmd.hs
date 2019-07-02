@@ -36,6 +36,7 @@ import qualified System.Directory as Dir
 import qualified Wrangle.Splice as Splice
 import qualified Options.Applicative as Opts
 import qualified Options.Applicative.Help.Pretty as Opts
+import qualified System.FilePath.Posix as PosixPath
 
 main :: IO ()
 main = join $ Opts.execParser opts
@@ -118,12 +119,13 @@ parseAdd =
   where
     build :: (Maybe PackageName) -> (Source.StringMap) -> Either String (PackageName, Source.PackageSpec)
     build name attrs =
-      case lookup "type"  of
-        Nothing -> buildGithub
-        Just "github" -> buildGithub
-        Just "url" -> buildUrl Source.FetchArchive
-        Just "file" -> buildUrl Source.FetchFile
-        Just t -> throwError ("Unsupported type: " <> (show t))
+      case ((Source.parseFetchType <$> lookup "type") `orElse` Right Source.FetchGithub)  of
+        Right Source.FetchGithub -> buildGithub
+        Right (Source.FetchUrl urlType) -> buildUrl urlType
+        Right Source.FetchPath -> buildLocalPath
+        Right Source.FetchGitLocal -> buildGitLocal
+        Right Source.FetchGit -> buildGit
+        Left err -> throwError err
       where
         packageSpec :: Source.SourceSpec -> Source.PackageSpec
         packageSpec sourceSpec = Source.PackageSpec {
@@ -135,16 +137,37 @@ parseAdd =
         }
 
         lookup attr = HMap.lookup attr attrs
+
+        require :: String -> Either String String
+        require k = toRight ("--"<>k<>" required") (lookup k)
+
         requireName :: Either String PackageName
         requireName = toRight "--name required" name
 
+        buildPath :: Either String Source.LocalPath
+        buildPath = build <$> require "path" where
+          build p = if PosixPath.isAbsolute p then Source.FullPath p else Source.RelativePath p
+
+        buildLocalPath :: Either String (PackageName, Source.PackageSpec)
+        buildLocalPath = build <$> requireName <*> buildPath where
+          build name path = (name, packageSpec $ Source.Path path)
+
+        buildGit :: Either String (PackageName, Source.PackageSpec)
+        buildGit = build <$> requireName <*> require "url" <*> (Source.Template <$> require "ref") where
+          build name gitUrl gitRef = (name,
+            packageSpec $ Source.Git $ Source.GitSpec { Source.gitUrl, Source.gitRef })
+
+        buildGitLocal :: Either String (PackageName, Source.PackageSpec)
+        buildGitLocal = build <$> requireName <*> buildPath <*> (Source.Template <$> require "ref") where
+          build name glPath glRef = (name,
+            packageSpec $ Source.GitLocal $ Source.GitLocalSpec { Source.glPath, Source.glRef })
+
         buildUrl :: Source.UrlFetchType -> Either String (PackageName, Source.PackageSpec)
-        buildUrl urlType = requireName >>= (\name -> case (lookup "url") of
-          (Just url) -> Right (name, packageSpec $ Source.Url Source.UrlSpec {
+        buildUrl urlType = build <$> requireName <*> require "url" where
+          build name url = (name, packageSpec $ Source.Url Source.UrlSpec {
             Source.urlType = urlType,
             Source.url = Source.Template url
           })
-          Nothing -> Left "--type required")
 
         buildGithub :: Either String (PackageName, Source.PackageSpec)
         buildGithub = build <$> identity
@@ -178,7 +201,7 @@ parsePackageAttrs = HMap.fromList <$> many parseAttribute where
       ) <|> shortcutAttributes <|>
     (("type",) <$> Opts.strOption
       ( Opts.long "type" <>
-        Opts.short 'T' <>
+        Opts.short 't' <>
         Opts.metavar "TYPE" <>
         Opts.help "The source type. Valid options: github | git | file | url | git-local"
       ))
@@ -410,7 +433,7 @@ cmdSplice opts path =
     srcSpan <- case existingSrcSpans of
       [single] -> return single
       other -> fail $ "No single source found in " ++ (show other)
-    let replacedText = Splice.replaceSourceLoc fileContents self srcSpan
+    replacedText <- liftEither $ Splice.replaceSourceLoc fileContents self srcSpan
     putStrLn (T.unpack replacedText)
 
 

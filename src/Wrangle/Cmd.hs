@@ -203,7 +203,7 @@ parsePackageAttrs = HMap.fromList <$> many parseAttribute where
       ( Opts.long "type" <>
         Opts.short 't' <>
         Opts.metavar "TYPE" <>
-        Opts.help "The source type. Valid options: github | git | file | url | git-local"
+        Opts.help ("The source type. "<> Source.validTypesDoc)
       ))
 
   -- Parse "key=val" into ("key", "val")

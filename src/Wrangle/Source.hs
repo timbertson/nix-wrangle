@@ -19,6 +19,7 @@ import Data.Hashable (Hashable)
 -- import GHC.Exts (toList)
 import System.FilePath ((</>))
 import Wrangle.Util
+import Data.List (intercalate)
 import Data.List.NonEmpty (NonEmpty(..))
 import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.Aeson as Aeson
@@ -85,6 +86,9 @@ data FetchType =
   | FetchGitLocal
   | FetchPath
 
+allFetchTypes = [ FetchGithub, FetchGit, FetchUrl FetchArchive, FetchUrl FetchFile, FetchGitLocal, FetchPath ]
+validTypesDoc = "Valid types: " <> (intercalate "|" $ map fetcherNameWrangle allFetchTypes)
+
 parseFetchType :: String -> Either String FetchType
 parseFetchType s = case s of
   "github" -> Right FetchGithub
@@ -92,7 +96,7 @@ parseFetchType s = case s of
   "file" -> Right $ FetchUrl FetchFile
   "path" -> Right FetchPath
   "git-local" -> Right FetchGitLocal
-  t -> Left $ "Unsupported type: " <> (show t)
+  t -> Left $ "Unsupported type: '" <> t <> "'. "<>validTypesDoc
 
 fetchType :: SourceSpec -> FetchType
 fetchType spec = case spec of

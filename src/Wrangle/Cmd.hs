@@ -386,6 +386,8 @@ cmdUpdate packageNamesOpt updateAttrs opts = do
     updateSingle packages name = do
       infoLn $ " - updating " <> (show name) <> "..."
       original <- liftEither $ Source.lookup name packages
+      debugLn $ "original: " <> show original
+      debugLn $ "updateAttrs: " <> show updateAttrs
       newSpec <- liftEither $ Source.updatePackageSpec original updateAttrs
       fetched <- if newSpec /= original
         then Fetch.prefetch name newSpec
@@ -396,6 +398,7 @@ cmdUpdate packageNamesOpt updateAttrs opts = do
     updateSources (sourceFile, sources) = do
       infoLn $ "Updating "<> Source.pathOfSource sourceFile <> " ..."
       let (packageNames, _) = partitionPackageNames sources
+      debugLn $ "Package names: " <> (show packageNames)
       updated <- foldM updateSingle sources packageNames
       Source.writeSourceFile sourceFile updated
 

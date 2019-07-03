@@ -316,7 +316,7 @@ updatePackageSpec original attrs = mergedJSON >>= liftResult <$> fromJSON where
   -- Going via JSON is a little hacky, but
   -- we've already got a nice to/from JSON code path
   mergedJSON = case (toJSON original, toJSON attrs) of
-    (Object orig, Object add) -> Right $ Object $ HMap.union orig add
+    (Object orig, Object add) -> Right $ Object $ HMap.union add orig
     (_, _) -> Left $ "Expected JSON object" -- should be impossible
 
 loadSourceFile :: SourceFile -> IO Packages

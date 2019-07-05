@@ -14,6 +14,7 @@ import Prelude hiding (error)
 import Control.Applicative
 import Control.Monad
 import Control.Monad.Except (throwError)
+-- import Control.Monad.Catch
 -- import Control.Exception (throw, AssertionFailed(..))
 -- import qualified Data.HashMap.Strict as HMap
 import Data.Char (toUpper)
@@ -21,7 +22,7 @@ import Data.Maybe (fromMaybe)
 import Data.List (partition)
 import Data.List.NonEmpty (NonEmpty(..))
 import qualified Data.List.NonEmpty as NonEmpty
-import Wrangle.Source (PackageName(..))
+import Wrangle.Source (PackageName(..), StringMap)
 import qualified Data.HashMap.Strict as HMap
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
@@ -29,6 +30,7 @@ import qualified Data.ByteString as B
 -- import qualified Data.ByteString.UTF8 as BU
 import qualified Data.ByteString.Lazy as LB
 -- import qualified Nix.Expr as N
+-- import qualified Control.Monad.State as S
 import Wrangle.Util
 import qualified Wrangle.Fetch as Fetch
 import qualified Wrangle.Source as Source
@@ -113,83 +115,109 @@ parseName = Source.PackageName <$> Opts.argument Opts.str (Opts.metavar "NAME")
 parseNames :: Opts.Parser [Source.PackageName]
 parseNames = many parseName
 
+(|>) a fn = fn a
+consumeAttr :: StringMap -> String -> (Maybe String, StringMap)
+consumeAttr map key = (HMap.lookup key map, HMap.delete key map)
+
 parseAdd :: Opts.Parser (Either AppError (PackageName, Source.PackageSpec))
 parseAdd =
   mapLeft AppError <$> (build <$> Opts.optional parseName <*> parsePackageAttrs)
   where
-    build :: (Maybe PackageName) -> (Source.StringMap) -> Either String (PackageName, Source.PackageSpec)
-    build name attrs =
-      case ((Source.parseFetchType <$> lookup "type") `orElse` Right Source.FetchGithub)  of
-        Right Source.FetchGithub -> buildGithub
-        Right (Source.FetchUrl urlType) -> buildUrl urlType
-        Right Source.FetchPath -> buildLocalPath
-        Right Source.FetchGitLocal -> buildGitLocal
-        Right Source.FetchGit -> buildGit
+    build :: (Maybe PackageName) -> (StringMap) -> Either String (PackageName, Source.PackageSpec)
+    build nameOpt attrs =
+      consumeAttr attrs "type" |> \(typ, attrs) ->
+      case (Source.parseFetchType <$> typ) `orElse` Right Source.FetchGithub of
+        Right Source.FetchGithub -> buildGithub attrs nameOpt
+        Right (Source.FetchUrl urlType) -> name >>= buildUrl urlType attrs
+        Right Source.FetchPath -> name >>= buildLocalPath attrs
+        Right Source.FetchGitLocal -> name >>= buildGitLocal attrs
+        Right Source.FetchGit -> name >>= buildGit attrs
         Left err -> throwError err
       where
-        packageSpec :: Source.SourceSpec -> Source.PackageSpec
-        packageSpec sourceSpec = Source.PackageSpec {
-          Source.sourceSpec,
-          -- TODO drop consumed attrs? Duplicates shouldn't matter
-          -- as long as SourceSpec doesn't transform inputs.
-          Source.packageAttrs = attrs,
-          Source.fetchAttrs = Source.emptyAttrs
-        }
+        name :: Either String PackageName
+        name = toRight "--name required" nameOpt
 
-        lookup attr = HMap.lookup attr attrs
+    packageSpec :: StringMap -> Source.SourceSpec -> Source.PackageSpec
+    packageSpec attrs sourceSpec = Source.PackageSpec {
+      Source.sourceSpec,
+      Source.packageAttrs = attrs,
+      Source.fetchAttrs = Source.emptyAttrs
+    }
 
-        require :: String -> Either String String
-        require k = toRight ("--"<>k<>" required") (lookup k)
+    require :: StringMap -> String -> Either String (String, StringMap)
+    require map k = consumeAttr map k |> ret where
+      -- TODO: is there a simpler formulation?
+      ret (val, attrs) = toRight ("--"<>k<>" required") (build <$> val) where
+        build val = (val, attrs)
 
-        requireName :: Either String PackageName
-        requireName = toRight "--name required" name
+    buildPath :: StringMap -> Either String (Source.LocalPath, StringMap)
+    buildPath attrs = build <$> require attrs "path" where
+      build (p, attrs) = (path, attrs) where
+        path = if PosixPath.isAbsolute p then Source.FullPath p else Source.RelativePath p
 
-        buildPath :: Either String Source.LocalPath
-        buildPath = build <$> require "path" where
-          build p = if PosixPath.isAbsolute p then Source.FullPath p else Source.RelativePath p
+    buildLocalPath :: StringMap -> PackageName -> Either String (PackageName, Source.PackageSpec)
+    buildLocalPath attrs name = build <$> buildPath attrs where
+      build (path, attrs) = (name, packageSpec attrs $ Source.Path path)
 
-        buildLocalPath :: Either String (PackageName, Source.PackageSpec)
-        buildLocalPath = build <$> requireName <*> buildPath where
-          build name path = (name, packageSpec $ Source.Path path)
+    buildGit :: StringMap -> PackageName -> Either String (PackageName, Source.PackageSpec)
+    buildGit attrs name = do
+      require attrs "url" >>= \(gitUrl, attrs) ->
+        require attrs "ref" >>= \(gitRef, attrs) ->
+        return $ (name, packageSpec attrs $ Source.Git $ Source.GitSpec {
+          Source.gitUrl,
+          Source.gitRef = Source.Template gitRef
+        })
+      
+      -- build <$> require "url" <*> (Source.Template <$> require "ref") where
+      -- build gitUrl gitRef = (name,
+      --   packageSpec attrs $ Source.Git $ Source.GitSpec { Source.gitUrl, Source.gitRef })
 
-        buildGit :: Either String (PackageName, Source.PackageSpec)
-        buildGit = build <$> requireName <*> require "url" <*> (Source.Template <$> require "ref") where
-          build name gitUrl gitRef = (name,
-            packageSpec $ Source.Git $ Source.GitSpec { Source.gitUrl, Source.gitRef })
+    buildGitLocal :: StringMap -> PackageName -> Either String (PackageName, Source.PackageSpec)
+    buildGitLocal attrs name =
+      require attrs "ref" >>= \(ref, attrs) ->
+        buildPath attrs >>= \(glPath, attrs) ->
+        return $ (name, packageSpec attrs $ Source.GitLocal $ Source.GitLocalSpec {
+          Source.glPath,
+          Source.glRef = (Source.Template ref)
+        })
 
-        buildGitLocal :: Either String (PackageName, Source.PackageSpec)
-        buildGitLocal = build <$> requireName <*> buildPath <*> (Source.Template <$> require "ref") where
-          build name glPath glRef = (name,
-            packageSpec $ Source.GitLocal $ Source.GitLocalSpec { Source.glPath, Source.glRef })
+    buildUrl :: Source.UrlFetchType -> StringMap -> PackageName -> Either String (PackageName, Source.PackageSpec)
+    buildUrl urlType attrs name =
+      require attrs "url" >>= \(url, attrs) ->
+      return (name, packageSpec attrs $ Source.Url Source.UrlSpec {
+        Source.urlType = urlType,
+        Source.url = Source.Template url
+      })
 
-        buildUrl :: Source.UrlFetchType -> Either String (PackageName, Source.PackageSpec)
-        buildUrl urlType = build <$> requireName <*> require "url" where
-          build name url = (name, packageSpec $ Source.Url Source.UrlSpec {
-            Source.urlType = urlType,
-            Source.url = Source.Template url
-          })
+    buildGithub :: StringMap -> Maybe PackageName -> Either String (PackageName, Source.PackageSpec)
+    buildGithub attrs name =
+      identity attrs >>= \(name, ghOwner, ghRepo, attrs) ->
+      consumeAttr attrs "ref" |> \(ref, attrs) ->
+      -- TODO: if I remove the return, the type error is confusing
+      -- TODO `lookup` is in scope, where did it come from?
+      return $ (name, packageSpec attrs $ Source.Github Source.GithubSpec {
+        Source.ghOwner,
+        Source.ghRepo,
+        Source.ghRef = ghRef ref
+      })
+      where
+        ghRef ref = Source.Template $ fromMaybe "master" ref
 
-        buildGithub :: Either String (PackageName, Source.PackageSpec)
-        buildGithub = build <$> identity
-          where
-            build (name, ghOwner, ghRepo) =
-              (name, packageSpec $ Source.Github Source.GithubSpec { Source.ghOwner, Source.ghRepo, Source.ghRef })
-              where ghRef = (fromMaybe (Source.Template "master") ref)
-
-            ref = Source.Template <$> lookup "ref"
-
-            identity :: Either String (PackageName, String, String)
-            identity = case (name, lookup "owner", lookup "repo") of
-              (name, Just owner, Just repo) -> Right (fromMaybe (PackageName repo) name, owner, repo)
+        identity :: StringMap -> Either String (PackageName, String, String, StringMap)
+        identity attrs =
+          consumeAttr attrs "owner" |> \(owner, attrs) ->
+            consumeAttr attrs "repo" |> \(repo, attrs) ->
+            case (name, owner, repo) of
+              (name, Just owner, Just repo) -> Right (fromMaybe (PackageName repo) name, owner, repo, attrs)
               -- (Just name, Just owner, Nothing) -> Right (PackageName name, owner, name)
               (Just (PackageName name), Nothing, Nothing) -> case span (/= '/') name of
-                (owner, '/':repo) -> Right (PackageName repo, owner, repo)
+                (owner, '/':repo) -> Right (PackageName repo, owner, repo, attrs)
                 _ -> throwError ("`" <> name <> "` doesn't look like a github repo")
               (Nothing, _, _) -> throwError "name or --owner/--repo required"
               (_, Nothing, Just _) -> throwError "--owner required when using --repo"
               (_, Just _, Nothing) -> throwError "--repo required when using --owner"
 
-parsePackageAttrs :: Opts.Parser (Source.StringMap)
+parsePackageAttrs :: Opts.Parser (StringMap)
 parsePackageAttrs = HMap.fromList <$> many parseAttribute where
   parseAttribute :: Opts.Parser (String, String)
   parseAttribute =
@@ -363,7 +391,7 @@ parseCmdUpdate =
           "  nix-wrangle update"
       ]
 
-cmdUpdate :: Maybe [PackageName] -> Source.StringMap -> CommonOpts -> IO ()
+cmdUpdate :: Maybe [PackageName] -> StringMap -> CommonOpts -> IO ()
 cmdUpdate packageNamesOpt updateAttrs opts = do
   sourceFiles <- requireConfiguredSources $ sources opts
   sources <- sequence $ loadSource <$> sourceFiles

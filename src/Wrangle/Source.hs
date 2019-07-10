@@ -281,6 +281,9 @@ emptyPackages = Packages HMap.empty
 add :: Packages -> PackageName -> PackageSpec -> Packages
 add s name spec = Packages $ HMap.insert name spec $ unPackages s
 
+remove :: Packages -> PackageName -> Packages
+remove s name = Packages $ HMap.delete name $ unPackages s
+
 emptyAttrs :: StringMap
 emptyAttrs = HMap.empty
 

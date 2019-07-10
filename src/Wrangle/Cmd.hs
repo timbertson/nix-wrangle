@@ -19,7 +19,7 @@ import Control.Monad.Except (throwError)
 -- import qualified Data.HashMap.Strict as HMap
 import Data.Char (toUpper)
 import Data.Maybe (fromMaybe)
-import Data.List (partition)
+import Data.List (partition, intercalate)
 import Data.List.NonEmpty (NonEmpty(..))
 import qualified Data.List.NonEmpty as NonEmpty
 import Wrangle.Source (PackageName(..), StringMap)
@@ -53,9 +53,11 @@ parseCommand :: Opts.Parser (IO ())
 parseCommand = Opts.subparser (
     Opts.command "init" parseCmdInit <>
     Opts.command "add" parseCmdAdd <>
+    Opts.command "rm" parseCmdRm <>
     Opts.command "update" parseCmdUpdate <>
     Opts.command "splice" parseCmdSplice <>
     Opts.command "show" parseCmdShow <>
+    Opts.command "ls" parseCmdLs <>
     Opts.command "default-nix" parseCmdDefaultNix
     )
 
@@ -270,7 +272,7 @@ parsePackageAttrs = HMap.fromList <$> many parseAttribute where
 parseCmdShow :: Opts.ParserInfo (IO ())
 parseCmdShow =
   Opts.info
-    ((cmdShow <$> parseCommon) <**>
+    ((cmdShow <$> parseCommon <*> Opts.optional parseNames) <**>
       Opts.helper) $
     mconcat desc
   where
@@ -283,12 +285,49 @@ parseCmdShow =
           "  nix-wrangle info"
       ]
 
-cmdShow :: CommonOpts -> IO ()
-cmdShow opts =
+-- TODO: parseNames should return a NonEmptyList!
+cmdShow :: CommonOpts -> Maybe [PackageName] -> IO ()
+cmdShow opts names =
+  do
+    sourceFiles <- requireConfiguredSources $ sources opts
+    sequence_ $ map showPkgs (NonEmpty.toList sourceFiles) where
+      showPkgs :: Source.SourceFile -> IO ()
+      showPkgs sourceFile = do
+        putStrLn $ " - "<>Source.pathOfSource sourceFile<>":"
+        packages <- Source.loadSourceFile sourceFile
+        putStrLn $ Source.encodePrettyString (filterPackages names packages)
+
+      filterPackages Nothing p = Source.unPackages p
+      filterPackages (Just names) p = HMap.filterWithKey pred (Source.unPackages p) where
+        pred name _ = elem name names
+
+parseCmdLs :: Opts.ParserInfo (IO ())
+parseCmdLs =
+  Opts.info
+    ((cmdLs <$> parseCommon) <**>
+      Opts.helper) $
+    mconcat desc
+  where
+    desc =
+      [ Opts.fullDesc
+      , Opts.progDesc "Show sources"
+      , Opts.headerDoc $ Just $
+          "Examples:" Opts.<$$>
+          "" Opts.<$$>
+          "  nix-wrangle info"
+      ]
+
+cmdLs :: CommonOpts -> IO ()
+cmdLs opts =
   do
     sourceFiles <- requireConfiguredSources $ sources opts
     sources <- Source.loadSources sourceFiles
-    putStrLn $ Source.encodePrettyString sources
+    putStrLn $
+      intercalate "\n" $
+      map (\s -> " - "<> Source.asString s) $
+      HMap.keys $ Source.unPackages $
+      Source.merge $ sources
+
 
 requireConfiguredSources :: Maybe (NonEmpty Source.SourceFile) -> IO (NonEmpty Source.SourceFile)
 requireConfiguredSources sources =
@@ -372,6 +411,34 @@ cmdAdd addOpt opts =
 
 loadSource :: Source.SourceFile -> IO (Source.SourceFile, Source.Packages)
 loadSource f = (,) f <$> Source.loadSourceFile f
+
+
+-------------------------------------------------------------------------------
+-- Rm
+-------------------------------------------------------------------------------
+parseCmdRm :: Opts.ParserInfo (IO ())
+parseCmdRm =
+  Opts.info
+    ((cmdRm <$> parseNames <*> parseCommon) <**>
+      Opts.helper) $
+    mconcat desc
+  where
+    desc =
+      [ Opts.fullDesc
+      , Opts.progDesc "Add sources"
+      , Opts.headerDoc $ Just $
+          "Examples:" Opts.<$$>
+          "" Opts.<$$>
+          "  nix-wrangle add"
+      ]
+
+cmdRm :: [PackageName] -> CommonOpts -> IO ()
+cmdRm packageNames opts = do
+  alterPackagesNamed (Just packageNames) opts updateSingle where
+  updateSingle :: Source.Packages -> PackageName -> IO Source.Packages
+  updateSingle packages name = do
+    infoLn $ " - removing " <> (show name) <> "..."
+    return $ Source.remove packages name
       
 -------------------------------------------------------------------------------
 -- Update
@@ -392,7 +459,23 @@ parseCmdUpdate =
       ]
 
 cmdUpdate :: Maybe [PackageName] -> StringMap -> CommonOpts -> IO ()
-cmdUpdate packageNamesOpt updateAttrs opts = do
+cmdUpdate packageNamesOpt updateAttrs opts =
+  alterPackagesNamed packageNamesOpt opts updateSingle where
+  updateSingle :: Source.Packages -> PackageName -> IO Source.Packages
+  updateSingle packages name = do
+    infoLn $ " - updating " <> (show name) <> "..."
+    original <- liftEither $ Source.lookup name packages
+    debugLn $ "original: " <> show original
+    debugLn $ "updateAttrs: " <> show updateAttrs
+    newSpec <- liftEither $ Source.updatePackageSpec original updateAttrs
+    fetched <- if newSpec /= original
+      then Fetch.prefetch name newSpec
+      else (infoLn "   ... unchanged" >> return newSpec)
+    return $ Source.add packages name fetched
+
+-- shared by update/rm
+alterPackagesNamed :: Maybe [PackageName] -> CommonOpts -> (Source.Packages -> PackageName -> IO Source.Packages)-> IO ()
+alterPackagesNamed packageNamesOpt opts updateSingle = do
   sourceFiles <- requireConfiguredSources $ sources opts
   sources <- sequence $ loadSource <$> sourceFiles
   checkMissingKeys (snd <$> sources)
@@ -410,18 +493,6 @@ cmdUpdate packageNamesOpt updateAttrs opts = do
       Nothing -> (Source.keys sources, [])
       (Just names) -> partition (Source.member sources) names
     
-    updateSingle :: Source.Packages -> PackageName -> IO Source.Packages
-    updateSingle packages name = do
-      infoLn $ " - updating " <> (show name) <> "..."
-      original <- liftEither $ Source.lookup name packages
-      debugLn $ "original: " <> show original
-      debugLn $ "updateAttrs: " <> show updateAttrs
-      newSpec <- liftEither $ Source.updatePackageSpec original updateAttrs
-      fetched <- if newSpec /= original
-        then Fetch.prefetch name newSpec
-        else (infoLn "   ... unchanged" >> return newSpec)
-      return $ Source.add packages name fetched
-
     updateSources :: (Source.SourceFile, Source.Packages) -> IO ()
     updateSources (sourceFile, sources) = do
       infoLn $ "Updating "<> Source.pathOfSource sourceFile <> " ..."

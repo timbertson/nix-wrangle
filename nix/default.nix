@@ -1,14 +1,12 @@
-{ stdenv, callPackage, fetchFromGitHub }:
-stdenv.mkDerivation rec {
-	src = fetchFromGitHub {
-		owner = "timbertson";
-		repo = "nix-source-automation";
-		rev = "33d172284b34e904d697145b167d85c5be3a7cee";
-		sha256 = "0my65kh7r3h19lkj1yjqm6xfyxxr9f8pdka6wzfwh773zbgdlqkd";
-	};
-	name="nix-source-automation";
-	passthru = {
+{ stdenv, git, callPackage, makeWrapper, fetchFromGitHub, haskellPackages }:
+# ./wrangle.nix is the vanilla cabal2nix output, so we wrap it here:
+(haskellPackages.callPackage ./wrangle.nix {}).overrideAttrs (o: rec {
+	src = null;
+	nativeBuildInputs = (o.nativeBuldInputs or []) ++ [makeWrapper];
+	installPhase = o.installPhase + ''
+		wrapProgram $out/bin/nix-wrangle --prefix PATH : ${git}/bin
+	'';
+	passthru = (o.passthru or {}) // {
 		api = args: callPackage "${src}/nix/api.nix" args;
 	};
-	buildCommand = "touch $out";
-}
+})

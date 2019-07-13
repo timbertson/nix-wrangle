@@ -15,24 +15,18 @@ import Control.Applicative
 import Control.Monad
 import Control.Monad.Except (throwError)
 import Control.Monad.State
--- import Control.Monad.Catch
--- import Control.Exception (throw, AssertionFailed(..))
--- import qualified Data.HashMap.Strict as HMap
 import Data.Char (toUpper)
 import Data.Maybe (fromMaybe)
 import Data.List (partition, intercalate)
 import Data.List.NonEmpty (NonEmpty(..))
-import qualified Data.List.NonEmpty as NonEmpty
 import Wrangle.Source (PackageName(..), StringMap)
+import Wrangle.Util
+import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.HashMap.Strict as HMap
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Data.ByteString as B
--- import qualified Data.ByteString.UTF8 as BU
 import qualified Data.ByteString.Lazy as LB
--- import qualified Nix.Expr as N
--- import qualified Control.Monad.State as S
-import Wrangle.Util
 import qualified Wrangle.Fetch as Fetch
 import qualified Wrangle.Source as Source
 import qualified System.Directory as Dir
@@ -42,13 +36,12 @@ import qualified Options.Applicative.Help.Pretty as Opts
 import qualified System.FilePath.Posix as PosixPath
 
 main :: IO ()
-main = join $ Opts.execParser opts
-  where
-    opts = Opts.info (parseCommand <**> Opts.helper) $ mconcat desc
-    desc =
-      [ Opts.fullDesc
-      , Opts.header "Nix-wrangle - source & dependency manager for Nix projects"
-      ]
+main = join $ Opts.execParser opts where
+  opts = Opts.info (parseCommand <**> Opts.helper) $ mconcat desc
+  desc =
+    [ Opts.fullDesc
+    , Opts.header "Nix-wrangle - source & dependency manager for Nix projects"
+    ]
 
 parseCommand :: Opts.Parser (IO ())
 parseCommand = Opts.subparser (

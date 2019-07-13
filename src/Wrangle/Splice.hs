@@ -11,8 +11,10 @@ import Prelude hiding (error)
 import Wrangle.Util
 import Data.Maybe (fromMaybe)
 import Data.List.NonEmpty (NonEmpty((:|)))
+import Data.Fix
 import System.IO.Unsafe
 import Nix.Expr hiding (stripAnnotation)
+import Nix.Parser (Result(..), parseNixTextLoc)
 import qualified Data.HashMap.Strict as HMap
 import qualified Wrangle.Source as Source
 import qualified Nix.Expr as Expr
@@ -23,8 +25,6 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import qualified Data.Text.Prettyprint.Doc as Doc
 import qualified Data.Text.Prettyprint.Doc.Render.Text as Doc
-import Data.Fix
-import Nix.Parser (Result(..), parseNixTextLoc)
 
 data Opts = Opts {
   input :: FilePath,

@@ -4,38 +4,21 @@
 module Wrangle.Fetch where
 
 import Prelude hiding (error)
--- import Control.Monad
 import Control.Exception (toException)
--- import Control.Error.Safe (justErr)
 import Control.Monad.Except (throwError)
-import Control.Applicative ((<|>), liftA2)
+import Control.Applicative (liftA2)
+import Control.DeepSeq (($!!))
 import Data.Aeson (toJSON)
--- import Data.Aeson.Types (typeMismatch, Parser)
--- import Data.Hashable (Hashable)
--- import System.FilePath ((</>))
-import qualified Data.Vector as Vector
-import Data.Vector (Vector)
 import Data.List (intercalate)
+import Data.Maybe (mapMaybe, listToMaybe)
+import Data.Char (isSpace)
+import Text.Regex.TDFA
 import Wrangle.Util
 import Wrangle.Source
-import Text.Regex.TDFA
-import qualified GitHub as GH
-import qualified GitHub.Data.Name as GH
-import qualified GitHub.Data.GitData as GHData
-import qualified GitHub.Endpoints.GitData.References as GHRef
 import qualified GHC.IO.Handle as H
--- import qualified Data.Aeson as Aeson
--- import qualified Data.Aeson.Encode.Pretty as AesonPretty
--- import qualified Data.ByteString as B
--- import qualified Data.ByteString.Lazy as L
 import qualified Data.HashMap.Strict as HMap
 import qualified Data.Text as T
 import qualified System.Process as P
--- import qualified Data.Text.Lazy as TL
--- import qualified Data.Text.Lazy.Encoding as TLE
--- import qualified Options.Applicative as Opts
--- import qualified System.Directory as Dir
--- import qualified System.FilePath.Posix as PosixPath
 
 prefetch :: PackageName -> PackageSpec -> IO PackageSpec
 prefetch name pkg = do
@@ -57,9 +40,9 @@ prefetch name pkg = do
       infoLn $ " - sha256-" <> (asString d))
 
   resolveAttrs :: SourceSpec -> IO [(String,String)]
-  resolveAttrs (Github (spec@ GithubSpec { ghOwner, ghRepo, ghRef })) = do
+  resolveAttrs (Github (GithubSpec { ghOwner, ghRepo, ghRef })) = do
     ref <- liftEither $ render ghRef
-    commit <- resolveGithubRef spec ref
+    commit <- revision <$> resolveGitRef ("https://github.com/"<>ghOwner<>"/"<>ghRepo<>".git") ref
     addDigest [ref, asString commit] [
       ("owner", ghOwner),
       ("repo", ghRepo),
@@ -71,7 +54,7 @@ prefetch name pkg = do
 
   resolveAttrs (Git (GitSpec { gitUrl, gitRef })) = do
     ref <- liftEither $ render gitRef
-    commit <- resolveGitRef gitUrl ref
+    commit <- revision <$> resolveGitRef gitUrl ref
     addDigest [ref, asString commit] [("url", gitUrl), ("rev", asString commit)]
 
   -- *Local require no prefetching:
@@ -82,31 +65,65 @@ prefetch name pkg = do
   resolveAttrs (Path p) = do
     return $ toStringPairs p
 
-resolveGithubRef :: GithubSpec -> String -> IO GitRevision
-resolveGithubRef (GithubSpec { ghRepo, ghOwner }) ref = do
-  debugLn $ "Resolving github reference: "<>ghRepo<>"/"<>ghOwner<>"#"<>ref
-  resolveGithubRef' ref <$> refs
+data ResolvedRef = ResolvedRef {
+  revision :: GitRevision,
+  ref :: String
+} deriving Show
+
+data OutputStream = Stdout | Stderr
+
+runProcessOutput :: OutputStream -> P.CreateProcess -> IO String
+runProcessOutput src p = P.withCreateProcess p read where
+  read _stdin stdout stderr proc = do
+    h <- liftMaybe (toException $ AppError $ srcDesc<>" handle is null") handle
+    contents <- H.hGetContents h
+    _ <- P.waitForProcess proc
+    return $!! contents
+    where
+      (srcDesc, handle) = case src of
+        Stdout -> ("stdout", stdout)
+        Stderr -> ("stderr", stderr)
+
+-- Git ref is resolved though:
+-- $ git ls-remote ~/dev/ocaml/gup/
+-- $ git ls-remote https://github.com/timbertson/gup.git
+-- Output: lines of `SHA<tab>ref`
+resolveGitRef :: String -> String -> IO ResolvedRef
+resolveGitRef remote refName = do
+  debugLn $ "Resolving git reference: "<>showRef
+  refs <- getRefs
+  sequence_ $ map (debugLn . show) refs
+  tap logResult $ liftEither $ toRight missing $ firstMatch refs
   where
-    refs = GHRef.references (name ghOwner) (name ghRepo) >>= liftEither
-    name = GH.N . T.pack
+    showRef = remote<>"#"<>refName
+    missing = AppError $ "Couldn't resolve ref "<>showRef
+    logResult result = debugLn $ "Resolved to: "<> show result
 
--- Git ref could be resolved though:
---  - smart API, e.g. https://github.com/schacon/simplegit.git/info/refs?service=git-upload-pack
---  - ssh, e.g. ssh git@github.com git-upload-pack schacon/simplegit.git
---  - local path, e.g. `git upload-pack /path/to/DIR`
-resolveGitRef :: String -> String -> IO GitRevision
-resolveGitRef _url _ref = fail "TODO"
+    getRefs :: IO [ResolvedRef]
+    getRefs = do
+      lines <- T.lines . T.pack <$> runProcessOutput Stdout processSpec
+      return $ mapMaybe parseLine lines
 
-resolveGithubRef' :: String -> Vector GH.GitReference -> GitRevision
-resolveGithubRef' ref refs = extractCommit (
-    nameEq ref <|> nameEq ("refs/tags/"<>ref) <|> nameEq ("refs/heads/"<>ref)
-  )
-  where
-    nameEq :: String -> Maybe GH.GitReference
-    nameEq candidate = Vector.find ((== T.pack candidate) . GHData.gitReferenceRef) refs
-    extractCommit Nothing = GitRevision ref -- assume it's a commit
-    extractCommit (Just ref) = GitRevision . T.unpack . GHData.gitObjectSha . GHData.gitReferenceObject $ ref
+    processSpec = (P.proc "git" ["ls-remote", remote]) {
+      P.std_in = P.NoStream,
+      P.std_out = P.CreatePipe,
+      P.std_err = P.Inherit
+    }
 
+    parseLine :: T.Text -> Maybe ResolvedRef
+    parseLine line = if rev == ""
+      then Nothing
+      else Just (ResolvedRef { revision = GitRevision (T.unpack rev), ref = T.unpack ref })
+      where
+        (rev, remainder) = T.break isSpace line
+        ref = T.strip remainder
+
+    firstMatch refs = listToMaybe (matchingRefs refs)
+    matchingRefs :: [ResolvedRef] -> [ResolvedRef]
+    matchingRefs refs = concatMap (\c -> filter (matches c) refs) candidates where
+      candidates = [refName, "refs/tags/"<>refName, "refs/heads/"<>refName]
+      matches :: String -> ResolvedRef -> Bool
+      matches candidate = ((==) candidate) . ref
 
 shaLen = 52
 dummySHA256 = concat $ replicate shaLen "0"
@@ -123,7 +140,9 @@ prefetchSha256 fetchType attrs = do
   where
     runCmd nixFetcher = do
       debugLn $ "+ " <> (show $ exe : args)
-      P.withCreateProcess processSpec parseErr
+      errText <- runProcessOutput Stderr processSpec
+      sequence_ $ map debugLn $ lines errText
+      liftEither $ extractExpectedDigest errText
       where
       fetchExpr = intercalate " " [
         "{fetchJSON}:",
@@ -137,17 +156,9 @@ prefetchSha256 fetchType attrs = do
         "--expr", fetchExpr]
 
       processSpec = (P.proc exe args) {
-        P.std_out = P.NoStream,
         P.std_in = P.NoStream,
+        P.std_out = P.NoStream,
         P.std_err = P.CreatePipe }
-
-    parseErr _ _ maybeErr proc = do
-      errHandle <- liftMaybe (toException $ AppError "stderr handle is null") maybeErr
-      errText <- H.hGetContents errHandle
-      sequence_ $ map debugLn $ lines errText
-      _ <- P.waitForProcess proc
-      liftEither $ extractExpectedDigest errText
-
 
 -- Thanks https://github.com/seppeljordan/nix-prefetch-github/blob/cd9708fcdf033874451a879ac5fe68d7df930b7e/src/nix_prefetch_github/__init__.py#L124
 -- For the future, note SRI: https://github.com/NixOS/nix/commit/6024dc1d97212130c19d3ff5ce6b1d102837eee6

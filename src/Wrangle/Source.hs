@@ -9,14 +9,12 @@ module Wrangle.Source where
 
 import Prelude hiding (error)
 import Control.Monad
-import Control.Error.Safe (justErr)
 import Control.Exception (Exception)
 import Data.Bifoldable (bifoldMap)
 import Control.Applicative ((<|>))
 import Data.Aeson hiding (eitherDecodeFileStrict, encodeFile)
 import Data.Aeson.Types (typeMismatch, Parser)
 import Data.Hashable (Hashable)
--- import GHC.Exts (toList)
 import System.FilePath ((</>))
 import Wrangle.Util
 import Data.List (intercalate)
@@ -358,7 +356,7 @@ instance Show NotFound where
 instance Exception NotFound
 
 lookup :: PackageName -> Packages -> Either NotFound PackageSpec
-lookup pkg (Packages packages) = justErr err $ HMap.lookup pkg packages where
+lookup pkg (Packages packages) = toRight err (HMap.lookup pkg packages) where
   err = (NotFound (show pkg, asString <$> HMap.keys packages))
 
 keys :: Packages -> [PackageName]

@@ -26,6 +26,7 @@ import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as L
 import qualified Data.HashMap.Strict as HMap
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as E
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.Encoding as TLE
 import qualified Options.Applicative as Opts
@@ -343,10 +344,8 @@ merge packages = do
   Packages $ foldr HMap.union HMap.empty (unPackages <$> packages)
 
 writeSourceFile :: SourceFile -> Packages -> IO ()
-writeSourceFile sourceFile packages = do
-  putStrLn $ "Writing sources: " ++ sourcePath
-  encodeFile sourcePath packages
-    where sourcePath = pathOfSource sourceFile
+writeSourceFile sourceFile packages =
+  encodeFile (pathOfSource sourceFile) packages
 
 newtype NotFound = NotFound (String, [String])
 instance Show NotFound where
@@ -405,11 +404,18 @@ stringOfLazy :: L.ByteString -> String
 stringOfLazy = TL.unpack . TLE.decodeUtf8
 
 encodeFile :: (ToJSON a) => FilePath -> a -> IO ()
-encodeFile path json = writeFileContents path (encodePretty json)
+encodeFile path json = writeFileLazyBytestring path (encodePretty json)
 
-writeFileContents :: FilePath -> L.ByteString -> IO ()
-writeFileContents path contents = do
-  L.writeFile tmpPath contents
+writeFileLazyBytestring :: FilePath -> L.ByteString -> IO ()
+writeFileLazyBytestring = writeFileContents' L.writeFile
+
+writeFileText :: FilePath -> T.Text -> IO ()
+writeFileText path text = writeFileContents' (\path -> B.writeFile path . E.encodeUtf8) path text
+
+writeFileContents' :: (FilePath -> a -> IO ()) -> FilePath -> a -> IO ()
+writeFileContents' writer path contents = do
+  infoLn $ "Writing: " <> path
+  writer tmpPath contents
   Dir.renameFile tmpPath path
   where tmpPath = path <> ".tmp" :: FilePath
 

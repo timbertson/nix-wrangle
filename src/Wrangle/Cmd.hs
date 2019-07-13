@@ -26,7 +26,6 @@ import qualified Data.HashMap.Strict as HMap
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Data.ByteString as B
-import qualified Data.ByteString.Lazy as LB
 import qualified Wrangle.Fetch as Fetch
 import qualified Wrangle.Source as Source
 import qualified System.Directory as Dir
@@ -139,7 +138,7 @@ parseAdd =
   mapLeft AppError <$> (build <$> Opts.optional parseName <*> parsePackageAttrs)
   where
     build :: (Maybe PackageName) -> (StringMap) -> Either String (PackageName, Source.PackageSpec)
-    build nameOpt = evalStateT (build' nameOpt)
+    build nameOpt = evalStateT (modify' canonicalizeNix >> build' nameOpt)
 
     build' :: Maybe PackageName -> StringMapState (PackageName, Source.PackageSpec)
     build' nameOpt = typ >>= \case
@@ -160,6 +159,12 @@ parseAdd =
       Source.packageAttrs = attrs,
       Source.fetchAttrs = Source.emptyAttrs
     }), HMap.empty)
+
+    -- default `nix` attribute, or drop it if it's explicitly `"false"`
+    canonicalizeNix attrs = case (HMap.lookup key attrs `orElse` "default.nix") of
+      "false" -> HMap.delete key attrs
+      other -> HMap.insert key other attrs
+      where key = "nix"
 
     buildPath :: StringMapState Source.LocalPath
     buildPath = build <$> consumeAttrT "path" where
@@ -505,14 +510,35 @@ alterPackagesNamed packageNamesOpt opts updateSingle = do
 -------------------------------------------------------------------------------
 -- Splice
 -------------------------------------------------------------------------------
+data SpliceOpts = SpliceOpts {
+  spliceName :: Maybe PackageName,
+  spliceInput :: FilePath,
+  spliceOutput :: FilePath
+}
+
 parseCmdSplice :: Opts.ParserInfo (IO ())
 parseCmdSplice =
   Opts.info
-    ((cmdSplice <$> parseCommon <*> parseNixPath) <**>
+    ((cmdSplice <$> parseSplice <*> parseCommon) <**>
       Opts.helper) $
     mconcat desc
   where
-    parseNixPath = Opts.argument Opts.str (Opts.metavar "NIX_FILE")
+    parseSplice = build <$> parseInput <*> parseOutput <*> parseName where
+      build spliceInput spliceOutput spliceName =
+        SpliceOpts { spliceInput, spliceOutput, spliceName }
+    parseInput = Opts.argument Opts.str (Opts.metavar "SOURCE")
+    parseName = Opts.optional (PackageName <$> Opts.strOption
+      ( Opts.long "name" <>
+        Opts.short 'n' <>
+        Opts.metavar "NAME" <>
+        Opts.help ("Source name to use (default: self)")
+      ))
+    parseOutput = (Opts.strOption
+      ( Opts.long "output" <>
+        Opts.short 'o' <>
+        Opts.metavar "DEST" <>
+        Opts.help ("Destination file")
+      ))
     desc =
       [ Opts.fullDesc
       , Opts.progDesc "Splice `self` dependency into a derivation base (typically nix/default.nix)"
@@ -522,23 +548,22 @@ parseCmdSplice =
           "  nix-wrangle Splice"
       ]
 
-cmdSplice :: CommonOpts -> FilePath -> IO ()
-cmdSplice opts path =
+cmdSplice :: SpliceOpts -> CommonOpts -> IO ()
+cmdSplice (SpliceOpts { spliceName, spliceInput, spliceOutput}) opts =
   do
-    fileContents <- Splice.load path
+    fileContents <- Splice.load spliceInput
     let expr = Splice.parse fileContents
     expr <- Splice.getExn expr
     -- putStrLn $ show $ expr
     sourceFiles <- requireConfiguredSources $ sources opts
     sources <- Source.merge <$> Source.loadSources sourceFiles
-    self <- liftEither $ Source.lookup (PackageName "self") sources
+    self <- liftEither $ Source.lookup (spliceName `orElse` PackageName "self") sources
     let existingSrcSpans = Splice.extractSourceLocs expr
     srcSpan <- case existingSrcSpans of
       [single] -> return single
       other -> fail $ "No single source found in " ++ (show other)
     replacedText <- liftEither $ Splice.replaceSourceLoc fileContents self srcSpan
-    putStrLn (T.unpack replacedText)
-
+    Source.writeFileText spliceOutput replacedText
 
 -------------------------------------------------------------------------------
 -- default-nix
@@ -570,7 +595,7 @@ defaultNixOptsDefault = DefaultNixOpts { force = False }
 updateDefaultNix :: DefaultNixOpts -> IO ()
 updateDefaultNix (DefaultNixOpts { force }) = do
   continue <- if force then return True else shouldWriteFile
-  if continue then writeFile
+  if continue then Source.writeFileText path contents
   else infoLn $ "Note: not replacing existing "<>path<>", run `nix-wrangle default-nix` to explicitly override"
   where
     path = "default.nix"
@@ -596,11 +621,6 @@ updateDefaultNix (DefaultNixOpts { force }) = do
       "in",
       "{ pkgs ? defaultPkgs, nix-wrangle ? defaultWrangle pkgs }:",
       "(nix-wrangle.api { inherit pkgs; }).inject ./nix" ]
-
-    writeFile :: IO ()
-    writeFile = do
-      infoLn $ "Updating " <> path
-      Source.writeFileContents path (LB.fromStrict . TE.encodeUtf8 $ contents)
 
     shouldWriteFile :: IO Bool
     shouldWriteFile = do

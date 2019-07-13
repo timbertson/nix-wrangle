@@ -12,7 +12,7 @@ import Wrangle.Util
 import Data.Maybe (fromMaybe)
 import Data.List.NonEmpty (NonEmpty((:|)))
 import Data.Fix
-import System.IO.Unsafe
+-- import System.IO.Unsafe
 import Nix.Expr hiding (stripAnnotation)
 import Nix.Parser (Result(..), parseNixTextLoc)
 import qualified Data.HashMap.Strict as HMap
@@ -150,7 +150,8 @@ extractSourceLocs :: Fix NExprLocF -> [(Maybe (Fix NExprF), SrcSpan)]
 extractSourceLocs expr =
   foldMap extractSources (unFix expr) where
     dbg :: String -> a -> a
-    dbg s x = unsafePerformIO (putStrLn s >> return x)
+    -- dbg s x = unsafePerformIO (putStrLn s >> return x)
+    dbg _ x = x
     extractSources :: Fix NExprLocF -> [(Maybe (Fix NExprF), SrcSpan)]
     extractSources expr =
       case value of

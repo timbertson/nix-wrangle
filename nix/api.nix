@@ -28,7 +28,6 @@ let
 						then { path = fullPath args.relativePath; } //
 							(filterAttrs (n: v: n != "relativePath") args)
 						else args;
-					;
 				in
 				fn finalArgs;
 			in {
@@ -58,17 +57,21 @@ let
 					else abort "Unknown fetcher: ${fetcher}"
 				;
 				src = if (attrs.unpack or false) then (unpackArchive fetched) else fetched;
-				nix = "${src}/${attrs.nix or "default.nix"}";
+				nixAttr = attrs.nix or null;
+				nix = if nixAttr == null then null else "${src}/${nixAttr}";
 				version = attrs.version or (fetchArgs.ref or null);
 
 				defaultCall = { pkgs, path }: pkgs.callPackage path {};
 				callImpl = attrs.call or defaultCall;
 
 				callWith = args:
-					builtins.trace "[wrangle] Building ${name} from ${nix} with ${src}" (overrideSrc {
-					inherit src version;
-					drv = callImpl args;
-				});
+					# If attrs.nix == null, we return the source instead of a derivation
+					if nix == null
+						then builtins.trace "[wrangle] Providing ${name} (source-only) from ${src}" src
+						else builtins.trace "[wrangle] Importing ${name} from ${nix}" (overrideSrc {
+							inherit src version;
+							drv = callImpl args;
+						});
 				drv = callWith { pkgs = _nixpkgs; path = nix; };
 				overlay = (self: super:
 					let

@@ -66,7 +66,6 @@ nix/wrangle-local.json: local deps
 TODO:
 - allow local overlays on global sources
   e.g. prefetch against a local git repo but publish with the public URL
-- splice: specify output path
 
 Use cases:
  - nix-wrangle splice: splice `self` into derivation base, to be used upstream (i.e. in nixpkgs)
@@ -474,9 +473,10 @@ cmdUpdate packageNamesOpt updateAttrs opts =
     debugLn $ "original: " <> show original
     debugLn $ "updateAttrs: " <> show updateAttrs
     newSpec <- liftEither $ Source.updatePackageSpec original updateAttrs
-    fetched <- if newSpec /= original
-      then Fetch.prefetch name newSpec
-      else (infoLn "   ... unchanged" >> return newSpec)
+    fetched <- Fetch.prefetch name newSpec
+    if fetched == original
+      then infoLn "   ... (unchanged)"
+      else return ()
     return $ Source.add packages name fetched
 
 -- shared by update/rm

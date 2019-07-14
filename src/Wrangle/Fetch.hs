@@ -28,34 +28,49 @@ prefetch name pkg = do
   return $ pkg { fetchAttrs = fetchAttrs }
   where
 
+  digestKey = "sha256"
+  existing key = HMap.lookup key (fetchAttrs pkg)
   src = sourceSpec pkg
   render = renderTemplate (packageAttrs pkg)
 
+  updateDigestIf :: Bool -> [String] -> [(String,String)] -> IO [(String,String)]
+  updateDigestIf cond path attrs = case existing digestKey of
+    (Just digest) | not cond -> return $ (digestKey, digest) : attrs
+    _ -> addDigest path attrs
+
   addDigest :: [String] -> [(String,String)] -> IO [(String,String)]
   addDigest path attrs = prefix <$> (log $ prefetchSha256 (fetchType src) attrs) where
-    prefix d = ("sha256", asString d) : attrs
+    prefix d = (digestKey, asString d) : attrs
     log = tap (\d -> do
-      infoLn $ "Resolved " <>
-        (intercalate " -> " (asString name : path))
-      infoLn $ " - sha256-" <> (asString d))
+      infoLn $ "Resolved " <> (intercalate " -> " (asString name : path))
+      infoLn $ " - "<>digestKey<>":" <> asString d)
+
+  resolveGit :: String -> Template -> IO (String, GitRevision)
+  resolveGit repo ref = do
+    ref <- liftEither $ render ref
+    commit <- revision <$> resolveGitRef repo ref
+    return (ref, commit)
+      
+  addGitDigest :: String -> GitRevision -> [(String,String)] -> IO [(String,String)]
+  addGitDigest ref commit =
+    updateDigestIf (Just (asString commit) /= existing "rev") [ref, asString commit]
 
   resolveAttrs :: SourceSpec -> IO [(String,String)]
   resolveAttrs (Github (GithubSpec { ghOwner, ghRepo, ghRef })) = do
-    ref <- liftEither $ render ghRef
-    commit <- revision <$> resolveGitRef ("https://github.com/"<>ghOwner<>"/"<>ghRepo<>".git") ref
-    addDigest [ref, asString commit] [
+    (ref, commit) <- resolveGit repo ghRef
+    addGitDigest ref commit [
       ("owner", ghOwner),
       ("repo", ghRepo),
-      ("rev", (asString commit))]
+      ("rev", asString commit)]
+    where repo = "https://github.com/"<>ghOwner<>"/"<>ghRepo<>".git"
+
+  resolveAttrs (Git (GitSpec { gitUrl, gitRef })) = do
+    (ref, commit) <- resolveGit gitUrl gitRef
+    addGitDigest ref commit [("url", gitUrl), ("rev", asString commit)]
 
   resolveAttrs (Url (UrlSpec { url })) = do
     renderedUrl <- liftEither $ render url
     addDigest [renderedUrl] [("url", renderedUrl)]
-
-  resolveAttrs (Git (GitSpec { gitUrl, gitRef })) = do
-    ref <- liftEither $ render gitRef
-    commit <- revision <$> resolveGitRef gitUrl ref
-    addDigest [ref, asString commit] [("url", gitUrl), ("rev", asString commit)]
 
   -- *Local require no prefetching:
   resolveAttrs (GitLocal (GitLocalSpec { glPath, glRef })) = do

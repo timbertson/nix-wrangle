@@ -40,4 +40,4 @@ function actual_output_local {
 }
 
 diff <(expected_output) <(actual_output_local)
-# diff <(expected_output) <(actual_output_github)
+diff <(expected_output) <(actual_output_github)

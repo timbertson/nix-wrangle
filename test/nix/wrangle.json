@@ -4,13 +4,13 @@
       "fetch": {
         "owner": "timbertson",
         "repo": "nix-wrangle",
-        "rev": "e8d33ec78f125ac5362b1bd32c178fac3fd2e8b6",
-        "sha256": "1ww5xwxc21w2sz5ga9k91gsbjll581pxk86vn2br71zc43d8cnbq"
+        "rev": "a0dd57880896322f3a2f42239bb017489e0d8fbf",
+        "sha256": "1pbjyfi7q7475ky0azg9x2c5y7jg9hj81z0awlxngz5cy5r43q6w"
       },
+      "nix": "default.nix",
       "owner": "timbertson",
       "ref": "v1",
       "repo": "nix-wrangle",
-      "nix": "default.nix",
       "type": "github"
     }
   },

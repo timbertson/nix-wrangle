@@ -107,8 +107,8 @@ parseCommon =
 parseName :: Opts.Parser Source.PackageName
 parseName = Source.PackageName <$> Opts.argument Opts.str (Opts.metavar "NAME")
 
-parseNames :: Opts.Parser [Source.PackageName]
-parseNames = many parseName
+parseNames :: Opts.Parser (Maybe (NonEmpty Source.PackageName))
+parseNames = NonEmpty.nonEmpty <$> many parseName
 
 (|>) a fn = fn a
 
@@ -278,7 +278,7 @@ parsePackageAttrs = HMap.fromList <$> many parseAttribute where
 parseCmdShow :: Opts.ParserInfo (IO ())
 parseCmdShow =
   Opts.info
-    ((cmdShow <$> parseCommon <*> Opts.optional parseNames) <**>
+    ((cmdShow <$> parseCommon <*> parseNames) <**>
       Opts.helper) $
     mconcat desc
   where
@@ -291,8 +291,7 @@ parseCmdShow =
           "  nix-wrangle info"
       ]
 
--- TODO: parseNames should return a NonEmptyList!
-cmdShow :: CommonOpts -> Maybe [PackageName] -> IO ()
+cmdShow :: CommonOpts -> Maybe (NonEmpty PackageName) -> IO ()
 cmdShow opts names =
   do
     sourceFiles <- requireConfiguredSources $ sources opts
@@ -438,8 +437,9 @@ parseCmdRm =
           "  nix-wrangle add"
       ]
 
-cmdRm :: [PackageName] -> CommonOpts -> IO ()
-cmdRm packageNames opts = do
+cmdRm :: Maybe (NonEmpty PackageName) -> CommonOpts -> IO ()
+cmdRm maybeNames opts = do
+  packageNames <- liftMaybe (AppError "package name required") maybeNames
   alterPackagesNamed (Just packageNames) opts updateSingle where
   updateSingle :: Source.Packages -> PackageName -> IO Source.Packages
   updateSingle packages name = do
@@ -452,7 +452,7 @@ cmdRm packageNames opts = do
 parseCmdUpdate :: Opts.ParserInfo (IO ())
 parseCmdUpdate =
   Opts.info
-    ((cmdUpdate <$> Opts.optional parseNames <*> parsePackageAttrs <*> parseCommon) <**> Opts.helper) $
+    ((cmdUpdate <$> parseNames <*> parsePackageAttrs <*> parseCommon) <**> Opts.helper) $
     mconcat desc
   where
     desc =
@@ -464,7 +464,7 @@ parseCmdUpdate =
           "  nix-wrangle update"
       ]
 
-cmdUpdate :: Maybe [PackageName] -> StringMap -> CommonOpts -> IO ()
+cmdUpdate :: Maybe (NonEmpty PackageName) -> StringMap -> CommonOpts -> IO ()
 cmdUpdate packageNamesOpt updateAttrs opts =
   alterPackagesNamed packageNamesOpt opts updateSingle where
   updateSingle :: Source.Packages -> PackageName -> IO Source.Packages
@@ -481,7 +481,7 @@ cmdUpdate packageNamesOpt updateAttrs opts =
     return $ Source.add packages name fetched
 
 -- shared by update/rm
-alterPackagesNamed :: Maybe [PackageName] -> CommonOpts -> (Source.Packages -> PackageName -> IO Source.Packages)-> IO ()
+alterPackagesNamed :: Maybe (NonEmpty PackageName) -> CommonOpts -> (Source.Packages -> PackageName -> IO Source.Packages)-> IO ()
 alterPackagesNamed packageNamesOpt opts updateSingle = do
   sourceFiles <- requireConfiguredSources $ sources opts
   sources <- sequence $ loadSource <$> sourceFiles
@@ -498,7 +498,7 @@ alterPackagesNamed packageNamesOpt opts updateSingle = do
     partitionPackageNames :: Source.Packages -> ([PackageName], [PackageName])
     partitionPackageNames sources = case packageNamesOpt of
       Nothing -> (Source.keys sources, [])
-      (Just names) -> partition (Source.member sources) names
+      (Just names) -> partition (Source.member sources) (NonEmpty.toList names)
     
     updateSources :: (Source.SourceFile, Source.Packages) -> IO ()
     updateSources (sourceFile, sources) = do

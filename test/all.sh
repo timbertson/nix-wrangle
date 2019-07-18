@@ -11,9 +11,8 @@ function run() {
 	fi
 }
 run "unit.sh"
-run "callpackage.sh"
 run "import-drv-check-identity.sh"
 run "nix-impure.sh"
 run "override-src.sh"
-run "nix-with-overlays.sh"
+run "integration.sh"
 exit "$st"

@@ -1,12 +1,12 @@
-{ stdenv, git, callPackage, makeWrapper, fetchFromGitHub, haskellPackages }:
+{ stdenv, lib, git, callPackage, makeWrapper, fetchFromGitHub, haskellPackages }:
 # ./wrangle.nix is the vanilla cabal2nix output, so we wrap it here:
 (haskellPackages.callPackage ./wrangle.nix {}).overrideAttrs (o: rec {
-	src = null;
+	src = abort "`src` not overridden";
 	nativeBuildInputs = (o.nativeBuldInputs or []) ++ [makeWrapper];
 	installPhase = o.installPhase + ''
 		wrapProgram $out/bin/nix-wrangle --prefix PATH : ${git}/bin
 	'';
 	passthru = (o.passthru or {}) // {
-		api = args: callPackage "${src}/nix/api.nix" args;
+		api = args: callPackage (../nix + "/api.nix") args;
 	};
 })

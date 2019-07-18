@@ -40,7 +40,7 @@ def main():
 		+ [
 		'-A', 'exportLocalGit',
 		'--show-trace',
-		os.path.join(here, '..', 'nix', 'default.nix'),
+		os.path.join(here, '..', 'nix', 'api-standalone.nix'),
 	])
 
 	if opts.working_changes:

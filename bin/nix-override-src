@@ -70,6 +70,6 @@ cmd = [opts.exe,
 	'--show-trace',
 	'--argstr', 'src', opts.src,
 	'--argstr', 'drv', opts.drv,
-	os.path.join(here, '..', 'nix', 'default.nix'),
+	os.path.join(here, '..', 'nix', 'api-standalone.nix'),
 ]
 os.execvp(cmd[0], cmd)

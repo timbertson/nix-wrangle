@@ -18,18 +18,20 @@ let
 	};
 
 	versionNoImport = {
-		source = ["github" {
+		type = "github";
+		fetch = {
 			"owner" = "timbertson";
 			"repo" = "version";
 			"rev" = "version-0.13.1";
 			"sha256" = "056l8m0xxl1h7x4fd1hf754w8q4sibpqnwgnbk5af5i66399az61";
-		}];
+		};
 	};
 
 	fakeNixpkgs = addHeader {
 		sources = {
 			nixpkgs = {
-				source = [ "path" { path = (toString ./.); } ];
+				type = "path";
+				fetch = { path = (toString ./.); };
 				nix = "fakeNixpkgs.nix";
 			};
 		};
@@ -48,7 +50,8 @@ let
 
 		["implPath is path" (isString (makeImport "name" versionSrc).nix)]
 
-		["nix defaults to default.nix" (hasSuffix "/default.nix" (makeImport "name" versionNoImport).nix)]
+		((result: eq "returns source if nix is unset" result.src result.drv)
+			(makeImport "name" versionNoImport))
 
 		["nix is modifiable" (hasSuffix "/foo.nix" (makeImport "name" (versionSrc // {nix = "foo.nix";})).nix)]
 
@@ -111,7 +114,7 @@ let
 		(eq "inject overrides src if `self` is given" ./samplePackage/local-src (
 			api.inject {
 				sources = [ version (addHeader {
-					sources.self = { source = [ "path" { path = ./samplePackage/local-src; } ]; };
+					sources.self = { type = "path"; fetch = { path = ./samplePackage/local-src; }; };
 				})];
 				nix = ({ pkgs, version }: pkgs.callPackage ./samplePackage/default.nix {});
 			}

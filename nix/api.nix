@@ -50,13 +50,12 @@ let
 		makeImport = settings: name: attrs:
 			let
 				fetchers = makeFetchers settings;
-				fetcher = elemAt attrs.spec 0;
+				fetcher = attrs.type;
 				fetchArgs = attrs.fetch;
-				fetched = if builtins.hasAttr fetcher fetchers
+				src = if builtins.hasAttr fetcher fetchers
 					then (builtins.getAttr fetcher fetchers) fetchArgs
 					else abort "Unknown fetcher: ${fetcher}"
 				;
-				src = if (attrs.unpack or false) then (unpackArchive fetched) else fetched;
 				nixAttr = attrs.nix or null;
 				nix = if nixAttr == null then null else "${src}/${nixAttr}";
 				version = attrs.version or (fetchArgs.ref or null);
@@ -141,11 +140,10 @@ let
 
 		pkgsOfImport = imports: {
 			overlays ? [],
-			extend ? null,
 			importArgs ? {},
 		}:
 		import _nixpkgs.path ({
-			overlays = overlays ++ (overlaysOfImport imports);
+			overlays = (overlaysOfImport imports) ++ overlays;
 		} // importArgs);
 
 		pkgs = {
@@ -164,43 +162,47 @@ let
 
 		derivations = args: mapAttrs (name: node: node.drv) (importFrom args).sources;
 
-		inject = arg:
+		inject = {
+			# inject args
+			nix,
+			provided ? {},
+			basePath ? null,
+
+			# callPackage args
+			args ? {},
+
+			# importFrom args
+			path ? null,
+			sources ? null,
+
+			# pkgsOfImport args
+			overlays ? [],
+			extend ? null,
+			importArgs ? {},
+		}:
 			let
 				isPath = p: builtins.typeOf p == "path";
-				argValue = if isPath arg then import arg else arg;
-				attrs = if isFunction argValue
-					then assert isPath arg; { nix = argValue; path = arg; }
-					else argValue;
-			in ({
-				# callPackage args
-				nix,
-				args ? {},
+				# if nix _is_ a path, it can act as `path` argument too
+				path = if basePath == null && isPath nix then nix else null;
+				imports = importFrom { inherit path sources extend; };
 
-				# importFrom args
-				path ? null,
-				sources ? null,
+				# If explicitly injected with e.g. `nixpkgs` and nix-wrangle, use those
+				# instead of reconstructing from source
+				injectedDepOverlay = (self: super: filterAttrs (n: v: v != null) provided);
 
-				# pkgsOfImport args
-				overlays ? [],
-				extend ? null,
-				importArgs ? {},
-			}:
-				let
-					imports = importFrom { inherit path sources extend; };
-					pkgs = pkgsOfImport imports {inherit overlays extend importArgs; };
-					base = pkgs.callPackage nix args;
-					overridden = let selfSrc = imports.sources.self or null; in (if selfSrc != null then
-						builtins.trace "[wrangle] injecting src from `self` dependency" (
-						let selfImpl = makeImport { inherit path; } selfSrc.name selfSrc.attrs; in
-						overrideSrc {
-							inherit (selfImpl) src version;
-							drv = base;
-						})
-					else
-						builtins.trace "[wrangle] no `self` dependency found" base
-					);
-				in
-				overridden
-			) attrs;
+				pkgs = pkgsOfImport imports {inherit importArgs;
+					overlays = [injectedDepOverlay] ++ overlays;
+				};
+				base = pkgs.callPackage nix args;
+				selfSrc = imports.sources.self or null;
+			in
+			(if selfSrc == null then base else
+				builtins.trace "[wrangle] injecting src from `self` dependency" (
+				let selfImpl = makeImport { inherit path; } selfSrc.name selfSrc.attrs; in
+				overrideSrc {
+					inherit (selfImpl) src version;
+					drv = base;
+				})
+			);
 	});
 in api

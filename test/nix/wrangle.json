@@ -1,35 +1,20 @@
-{ "wrangle": { "apiversion": 1 }
-, "inject":
-	{ "wrangle":
-		{ "fetch":
-			[ "github",
-				{ "owner": "timbertson"
-				, "repo": "nix-source-automation"
-				, "rev": "1cfc0414cf94200f614142ad5643fd597ea3bff7"
-				, "sha256": "0vq2dw2sbigbxqyyrmx0qnd6ki0qaa4biyla7b81cng759klhypa"
-				}
-			]
-		}
-	}
-, "self":
-	{ "fetch":
-		[ "fetchGitLocal"
-			# relative to `path` as passed into wrangle API
-		, { "relativePath": "../" }
-
-, "sources":
-	{ "opam2nix-packages":
-		{ "fetch":
-			[ "github"
-			, { "repo": "opam2nix-packages"
-				, "owner": "timbertson"
-				, "rev": "f0ec05db5fc4eccf8d591d13d7a519755ea5a3a2"
-				, "sha256": "12ywdn3552gkvmv5iwmzd5sfhzqkci30g88ag8dhqshiw8x0ijpd"
-				}
-			]
-		, "ref": "master"
-		, "version": "1.2.3"
-		, "nix": "nix"
-		}
-	}
+{
+  "sources": {
+    "nix-wrangle": {
+      "fetch": {
+        "owner": "timbertson",
+        "repo": "nix-wrangle",
+        "rev": "e8d33ec78f125ac5362b1bd32c178fac3fd2e8b6",
+        "sha256": "1ww5xwxc21w2sz5ga9k91gsbjll581pxk86vn2br71zc43d8cnbq"
+      },
+      "owner": "timbertson",
+      "ref": "v1",
+      "repo": "nix-wrangle",
+      "nix": "default.nix",
+      "type": "github"
+    }
+  },
+  "wrangle": {
+    "apiversion": 1
+  }
 }

@@ -20,6 +20,7 @@ executable nix-wrangle
     base
     , bytestring
     , text
+    , string-qq
 
     -- util
     , filepath

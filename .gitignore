@@ -1,3 +1,4 @@
 result*
 dist*
 .ghc.environment.*
+/test/default.nix

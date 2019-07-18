@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -eu
 here="$(dirname "$0")"
-exe="$(find "$here/../"dist{,-newstyle} -type f -name nix-wrangle)"
+exe="$(find "$here/../"dist* -type f -name nix-wrangle)"
 [ -n "$exe" ] || (echo "nix-wrangle executable not found"; exit 1)
 set -x
 exec "$exe" "$@"

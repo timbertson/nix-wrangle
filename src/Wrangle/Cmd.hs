@@ -17,7 +17,7 @@ import Control.Monad.Except (throwError)
 import Control.Monad.State
 import Data.Char (toUpper)
 import Data.Maybe (fromMaybe)
-import Data.List (partition, intercalate)
+import Data.List (partition, intercalate, intersperse)
 import Data.List.NonEmpty (NonEmpty(..))
 import Wrangle.Source (PackageName(..), StringMap)
 import Wrangle.Util
@@ -32,7 +32,7 @@ import qualified Wrangle.Source as Source
 import qualified System.Directory as Dir
 import qualified Wrangle.Splice as Splice
 import qualified Options.Applicative as Opts
-import qualified Options.Applicative.Help.Pretty as Opts
+import qualified Options.Applicative.Help.Pretty as Doc
 import qualified System.FilePath.Posix as PosixPath
 
 main :: IO ()
@@ -45,15 +45,29 @@ main = join $ Opts.execParser opts where
 
 parseCommand :: Opts.Parser (IO ())
 parseCommand = Opts.subparser (
-    Opts.command "init" parseCmdInit <>
-    Opts.command "add" parseCmdAdd <>
-    Opts.command "rm" parseCmdRm <>
-    Opts.command "update" parseCmdUpdate <>
-    Opts.command "splice" parseCmdSplice <>
-    Opts.command "show" parseCmdShow <>
-    Opts.command "ls" parseCmdLs <>
-    Opts.command "default-nix" parseCmdDefaultNix
-    )
+  Opts.command "init" parseCmdInit <>
+  Opts.command "add" parseCmdAdd <>
+  Opts.command "rm" parseCmdRm <>
+  Opts.command "update" parseCmdUpdate <>
+  Opts.command "splice" parseCmdSplice <>
+  Opts.command "show" parseCmdShow <>
+  Opts.command "ls" parseCmdLs <>
+  Opts.command "default-nix" parseCmdDefaultNix
+  )
+
+subcommand desc action infoMod =
+  Opts.info
+    (Opts.helper <*> action) $
+    mconcat ([
+      Opts.fullDesc,
+      Opts.progDesc desc
+    ] ++ infoMod)
+
+docLines :: [Doc.Doc] -> Doc.Doc
+docLines lines = foldr (<>) Doc.empty (intersperse Doc.hardline lines)
+softDocLines lines = foldr (<>) Doc.empty (intersperse Doc.softline lines)
+
+examplesDoc ex = Opts.footerDoc $ Just $ docLines ["Examples:", Doc.indent 2 $ docLines ex]
 
 {-
 
@@ -178,19 +192,19 @@ parseAdd =
     buildGit :: PackageName -> StringMapState (PackageName, Source.PackageSpec)
     buildGit name = do
       gitUrl <- consumeAttrT "url"
-      gitRef <- consumeAttrT "ref"
+      gitRef <- optionalAttrT "ref"
       packageSpec name $ Source.Git $ Source.GitSpec {
         Source.gitUrl,
-        Source.gitRef = Source.Template gitRef
+        Source.gitRef = Source.Template (gitRef `orElse` "master")
       }
       
     buildGitLocal :: PackageName -> StringMapState (PackageName, Source.PackageSpec)
     buildGitLocal name = do
       glPath <- buildPath
-      ref <- consumeAttrT "ref"
+      ref <- optionalAttrT "ref"
       packageSpec name $ Source.GitLocal $ Source.GitLocalSpec {
         Source.glPath,
-        Source.glRef = (Source.Template ref)
+        Source.glRef = (Source.Template (ref `orElse` "HEAD"))
       }
 
     buildUrl :: Source.UrlFetchType -> PackageName -> StringMapState (PackageName, Source.PackageSpec)
@@ -276,20 +290,7 @@ parsePackageAttrs = HMap.fromList <$> many parseAttribute where
 -- Show
 -------------------------------------------------------------------------------
 parseCmdShow :: Opts.ParserInfo (IO ())
-parseCmdShow =
-  Opts.info
-    ((cmdShow <$> parseCommon <*> parseNames) <**>
-      Opts.helper) $
-    mconcat desc
-  where
-    desc =
-      [ Opts.fullDesc
-      , Opts.progDesc "Show sources"
-      , Opts.headerDoc $ Just $
-          "Examples:" Opts.<$$>
-          "" Opts.<$$>
-          "  nix-wrangle info"
-      ]
+parseCmdShow = subcommand "Show source details" (cmdShow <$> parseCommon <*> parseNames) []
 
 cmdShow :: CommonOpts -> Maybe (NonEmpty PackageName) -> IO ()
 cmdShow opts names =
@@ -307,20 +308,7 @@ cmdShow opts names =
         pred name _ = elem name names
 
 parseCmdLs :: Opts.ParserInfo (IO ())
-parseCmdLs =
-  Opts.info
-    ((cmdLs <$> parseCommon) <**>
-      Opts.helper) $
-    mconcat desc
-  where
-    desc =
-      [ Opts.fullDesc
-      , Opts.progDesc "Show sources"
-      , Opts.headerDoc $ Just $
-          "Examples:" Opts.<$$>
-          "" Opts.<$$>
-          "  nix-wrangle info"
-      ]
+parseCmdLs = subcommand "list sources" (cmdLs <$> parseCommon) []
 
 cmdLs :: CommonOpts -> IO ()
 cmdLs opts =
@@ -333,7 +321,6 @@ cmdLs opts =
       HMap.keys $ Source.unPackages $
       Source.merge $ sources
 
-
 requireConfiguredSources :: Maybe (NonEmpty Source.SourceFile) -> IO (NonEmpty Source.SourceFile)
 requireConfiguredSources sources =
   Source.configuredSources sources >>=
@@ -343,20 +330,7 @@ requireConfiguredSources sources =
 -- Init
 -------------------------------------------------------------------------------
 parseCmdInit :: Opts.ParserInfo (IO ())
-parseCmdInit =
-  Opts.info
-    (pure cmdInit <**>
-      Opts.helper) $
-    mconcat desc
-  where
-    desc =
-      [ Opts.fullDesc
-      , Opts.progDesc "Initialize nix-wrangle"
-      , Opts.headerDoc $ Just $
-          "Examples:" Opts.<$$>
-          "" Opts.<$$>
-          "  nix-wrangle init"
-      ]
+parseCmdInit = subcommand "Initialize nix-wrangle" (pure cmdInit) []
 
 cmdInit :: IO ()
 cmdInit = do
@@ -378,20 +352,12 @@ cmdInit = do
 -- Add
 -------------------------------------------------------------------------------
 parseCmdAdd :: Opts.ParserInfo (IO ())
-parseCmdAdd =
-  Opts.info
-    ((cmdAdd <$> parseAdd <*> parseCommon) <**>
-      Opts.helper) $
-    mconcat desc
-  where
-    desc =
-      [ Opts.fullDesc
-      , Opts.progDesc "Add sources"
-      , Opts.headerDoc $ Just $
-          "Examples:" Opts.<$$>
-          "" Opts.<$$>
-          "  nix-wrangle add"
-      ]
+parseCmdAdd = subcommand "Add a source" (cmdAdd <$> parseAdd <*> parseCommon)
+  [ examplesDoc [
+    "nix-wrangle add timbertson/opam2nix-packages",
+    "nix-wrangle add --name pkgs nixos/nixpkgs-channels --ref nixos-unstable",
+    "nix-wrangle add self --type git-local --path ../"
+  ]]
 
 cmdAdd :: Either AppError (PackageName, Source.PackageSpec) -> CommonOpts -> IO ()
 cmdAdd addOpt opts =
@@ -422,24 +388,11 @@ loadSource f = (,) f <$> Source.loadSourceFile f
 -- Rm
 -------------------------------------------------------------------------------
 parseCmdRm :: Opts.ParserInfo (IO ())
-parseCmdRm =
-  Opts.info
-    ((cmdRm <$> parseNames <*> parseCommon) <**>
-      Opts.helper) $
-    mconcat desc
-  where
-    desc =
-      [ Opts.fullDesc
-      , Opts.progDesc "Add sources"
-      , Opts.headerDoc $ Just $
-          "Examples:" Opts.<$$>
-          "" Opts.<$$>
-          "  nix-wrangle add"
-      ]
+parseCmdRm = subcommand "Remove one or more sources" (cmdRm <$> parseNames <*> parseCommon) []
 
 cmdRm :: Maybe (NonEmpty PackageName) -> CommonOpts -> IO ()
 cmdRm maybeNames opts = do
-  packageNames <- liftMaybe (AppError "package name required") maybeNames
+  packageNames <- liftMaybe (AppError "at least one name required") maybeNames
   alterPackagesNamed (Just packageNames) opts updateSingle where
   updateSingle :: Source.Packages -> PackageName -> IO Source.Packages
   updateSingle packages name = do
@@ -450,19 +403,12 @@ cmdRm maybeNames opts = do
 -- Update
 -------------------------------------------------------------------------------
 parseCmdUpdate :: Opts.ParserInfo (IO ())
-parseCmdUpdate =
-  Opts.info
-    ((cmdUpdate <$> parseNames <*> parsePackageAttrs <*> parseCommon) <**> Opts.helper) $
-    mconcat desc
-  where
-    desc =
-      [ Opts.fullDesc
-      , Opts.progDesc "Update sources"
-      , Opts.headerDoc $ Just $
-          "Examples:" Opts.<$$>
-          "" Opts.<$$>
-          "  nix-wrangle update"
-      ]
+parseCmdUpdate = subcommand "Update one or more sources"
+  (cmdUpdate <$> parseNames <*> parsePackageAttrs <*> parseCommon)
+  [ examplesDoc [
+    "nix-wrangle update pkgs --ref nixpkgs-unstable",
+    "nix-wrangle update gup --nix nix/"
+  ]]
 
 cmdUpdate :: Maybe (NonEmpty PackageName) -> StringMap -> CommonOpts -> IO ()
 cmdUpdate packageNamesOpt updateAttrs opts =
@@ -518,11 +464,19 @@ data SpliceOpts = SpliceOpts {
 }
 
 parseCmdSplice :: Opts.ParserInfo (IO ())
-parseCmdSplice =
-  Opts.info
-    ((cmdSplice <$> parseSplice <*> parseCommon) <**>
-      Opts.helper) $
-    mconcat desc
+parseCmdSplice = subcommand "Splice current `self` source into a .nix document"
+  (cmdSplice <$> parseSplice <*> parseCommon) [
+    Opts.footerDoc $ Just $ docLines [
+      softDocLines [
+        "This command generates a copy of the input .nix file, with",
+        "the `src` attribute replaced with the current fetcher for",
+        "the source named `self`."],
+      "",
+      softDocLines [
+        "This allows you to build a standalone",
+        ".nix file for publishing (e.g. to nixpkgs itself)"
+      ]
+  ]]
   where
     parseSplice = build <$> parseInput <*> parseOutput <*> parseName where
       build spliceInput spliceOutput spliceName =
@@ -540,14 +494,6 @@ parseCmdSplice =
         Opts.metavar "DEST" <>
         Opts.help ("Destination file")
       ))
-    desc =
-      [ Opts.fullDesc
-      , Opts.progDesc "Splice `self` dependency into a derivation base (typically nix/default.nix)"
-      , Opts.headerDoc $ Just $
-          "Examples:" Opts.<$$>
-          "" Opts.<$$>
-          "  nix-wrangle Splice"
-      ]
 
 cmdSplice :: SpliceOpts -> CommonOpts -> IO ()
 cmdSplice (SpliceOpts { spliceName, spliceInput, spliceOutput}) opts =
@@ -570,20 +516,12 @@ cmdSplice (SpliceOpts { spliceName, spliceInput, spliceOutput}) opts =
 -- default-nix
 -------------------------------------------------------------------------------
 parseCmdDefaultNix :: Opts.ParserInfo (IO ())
-parseCmdDefaultNix =
-  Opts.info
-    ((pure cmdDefaultNix) <**>
-      Opts.helper) $
-    mconcat desc
-  where
-    desc =
-      [ Opts.fullDesc
-      , Opts.progDesc "Show sources"
-      , Opts.headerDoc $ Just $
-          "Examples:" Opts.<$$>
-          "" Opts.<$$>
-          "  nix-wrangle info"
-      ]
+parseCmdDefaultNix = subcommand "Generate default.nix"
+  (pure cmdDefaultNix) [
+    Opts.footerDoc $ Just $
+      "Typically this only needs to be done once, though it" <>
+      " may be necessary if you have a very old default.nix"
+    ]
 
 cmdDefaultNix :: IO ()
 cmdDefaultNix = updateDefaultNix (DefaultNixOpts { force = True })

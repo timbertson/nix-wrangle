@@ -271,7 +271,8 @@ parsePackageAttrs = HMap.fromList <$> many parseAttribute where
       ("repo", "github"),
       ("url", "url / file / git"),
       ("path", "git-local"),
-      ("version", "all")
+      ("version", "all"),
+      ("nix", "all")
     ]
 
   mkShortcutAttribute :: (String, String) -> Opts.Parser (String, String)

@@ -22,7 +22,7 @@ import qualified System.Process as P
 
 prefetch :: PackageName -> PackageSpec -> IO PackageSpec
 prefetch name pkg = do
-  debugLn ("fetching " <> (show src))
+  infoLn $ "fetching " <> (show src)
   fetchAttrs <- HMap.fromList <$> resolveAttrs src
   debugLn $ "Prefetch results: " <> show fetchAttrs
   return $ pkg { fetchAttrs = fetchAttrs }

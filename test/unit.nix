@@ -5,9 +5,11 @@ let api = (callPackage ../nix/api.nix {}); internal = api.internal; in
 let
 	wrangleHeader = { apiversion = 1; };
 	addHeader = j: j // { wrangle = wrangleHeader; };
-	eq = msg: a: b: [
-		"${msg}: ${toJSON a} != ${toJSON b}" (a == b)
-	];
+	eq = msg: a: b:
+		# lib.warn "Executing test case: ${msg}"
+		[
+			"${msg}: ${toJSON a} != ${toJSON b}" (a == b)
+		];
 
 	versionSrc = import samplePackage/versionSrc.nix;
 
@@ -69,6 +71,23 @@ let
 
 		["makes derivations" (isDerivation (api.derivations { sources = [ version ]; }).version)]
 
+		(eq "importFrom merges packages, not recursively" (
+			(api.importFrom { sources = [
+				(addHeader { sources = {
+					first = { type="git"; key = "value1"; };
+					both = { type="git"; key1 = "key1value1"; key2 = "key2value1";};
+				}; })
+				(addHeader { sources = {
+					both = { type="git"; key2 = "key2value2"; key3 = "key3value2"; };
+					second = { type="git"; key = "value2"; };
+				}; })
+			]; }).sourceAttrs)
+			{
+				first = { type="git"; key = "value1"; };
+				both = { type="git"; key2 = "key2value2"; key3 = "key3value2"; };
+				second = { type="git"; key = "value2"; };
+			})
+
 		(eq "overlay merges up to attr path"
 			(
 				let result = ((makeImport "a.b.c.version" versionSrc).overlay
@@ -99,10 +118,7 @@ let
 		}).version.extra)
 
 		(eq "inject works with just a path" ./samplePackage/upstream-src
-			(api.inject ./samplePackage).src)
-
-		(eq "inject works with a path which is an attrset of args" "attr!"
-			(api.inject ./samplePackage/attrs.nix).custom)
+			(api.inject { nix = ./samplePackage; }).src)
 
 		(eq "inject works with an attrset and no `self`" ./samplePackage/upstream-src (
 			api.inject {

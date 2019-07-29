@@ -124,15 +124,21 @@ let
 						)
 				)
 			);
-			jsonSources = lib.foldr recursiveUpdate { sources = {}; } jsonList;
-			jsonExtended = if extend == null then jsonSources else (
+			# For convenience we drop everything but `sources` at this stage.
+			# We could return those at the toplevel, but this lets us add more
+			# attributes later if needed.
+			jsonSourcesList = map (j: j.sources) jsonList;
+			jsonSources = lib.foldr (a: b: a // b) {} jsonSourcesList;
+			jsonSourcesExtended = if extend == null then jsonSources else (
 				# extend only acts on `sources`, not the full attrset
-				recursiveUpdate jsonSources ({ sources = extend jsonSources.sources; })
+				recursiveUpdate jsonSources (extend jsonSources)
 			);
 		in
-		# map `sources` into imports instead of plain attrs
-		jsonExtended // {
-			sources = importsOfJson { inherit path; } jsonExtended.sources;
+		{
+			# persist sourcesAttrs for testing / debug purposes
+			sourceAttrs = jsonSourcesExtended;
+			# map `sources` into imports instead of plain attrs
+			sources = importsOfJson { inherit path; } jsonSourcesExtended;
 		};
 
 		overlaysOfImport = imports:

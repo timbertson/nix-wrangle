@@ -367,10 +367,12 @@ member = (flip HMap.member) . unPackages
 defaultSourceFileCandidates :: [SourceFile]
 defaultSourceFileCandidates = [ DefaultSource, LocalSource ]
 
+doesSourceExist = Dir.doesFileExist . pathOfSource
+
 detectDefaultSources :: IO (Maybe (NonEmpty SourceFile))
 detectDefaultSources = tap log $ NonEmpty.nonEmpty <$> fileList where
   log sources = debugLn $ "Detected default sources:" <> show sources
-  fileList = filterM (Dir.doesFileExist . pathOfSource) defaultSourceFileCandidates
+  fileList = filterM doesSourceExist defaultSourceFileCandidates
 
 configuredSources :: Maybe (NonEmpty SourceFile) -> IO (Maybe (NonEmpty SourceFile))
 configuredSources Nothing = detectDefaultSources

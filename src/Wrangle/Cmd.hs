@@ -360,15 +360,17 @@ parseCmdAdd = subcommand "Add a source" (cmdAdd <$> parseAdd <*> parseCommon)
     "nix-wrangle add self --type git-local --path ../"
   ]]
 
+-- TODO: accept an optional second arg, and treat it as the "main" spec (i.e. owner/repo, url, or path depending on type)
+-- TODO: add --replace arg, and refuse to overwrite existing package unless given
 cmdAdd :: Either AppError (PackageName, Source.PackageSpec) -> CommonOpts -> IO ()
 cmdAdd addOpt opts =
   do
     (name, inputSpec) <- liftEither addOpt
     putStrLn $ "Adding " <> show name <> " // " <> show inputSpec
     configuredSources <- Source.configuredSources $ sources opts
-    let extantSourceFile = NonEmpty.head <$> configuredSources
-    debugLn $ "extantSourceFile: " <> show extantSourceFile
-    let loadedSourceFile = loadSource' <$> extantSourceFile
+    let sourceFile = NonEmpty.head <$> configuredSources
+    debugLn $ "sourceFile: " <> show sourceFile
+    let loadedSourceFile = tryLoadSource <$> sourceFile
     source :: (Source.SourceFile, Maybe Source.Packages) <- fromMaybe (return (Source.DefaultSource, Nothing)) loadedSourceFile
     debugLn $ "source: " <> show source
     let (sourceFile, inputSource) = source
@@ -377,13 +379,14 @@ cmdAdd addOpt opts =
     let modifiedSource = Source.add baseSource name spec
     Source.writeSourceFile sourceFile modifiedSource
   where
-    loadSource' :: Source.SourceFile -> IO (Source.SourceFile, Maybe Source.Packages)
+    tryLoadSource :: Source.SourceFile -> IO (Source.SourceFile, Maybe Source.Packages)
     -- TODO: arrows?
-    loadSource' f = (\(a,b) -> (a, Just b)) <$> loadSource f
-
-loadSource :: Source.SourceFile -> IO (Source.SourceFile, Source.Packages)
-loadSource f = (,) f <$> Source.loadSourceFile f
-
+    tryLoadSource f = do
+      exists <- Source.doesSourceExist f
+      loaded <- sequence $ if exists
+        then Just $ Source.loadSourceFile f
+        else Nothing
+      return (f, loaded)
 
 -------------------------------------------------------------------------------
 -- Rm
@@ -454,6 +457,9 @@ alterPackagesNamed packageNamesOpt opts updateSingle = do
       debugLn $ "Package names: " <> (show packageNames)
       updated <- foldM updateSingle sources packageNames
       Source.writeSourceFile sourceFile updated
+
+loadSource :: Source.SourceFile -> IO (Source.SourceFile, Source.Packages)
+loadSource f = (,) f <$> Source.loadSourceFile f
 
 -------------------------------------------------------------------------------
 -- Splice

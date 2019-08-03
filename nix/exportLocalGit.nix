@@ -6,6 +6,7 @@
 
 { path, commit ? null, ref ? null, workingChanges ? false, unpack ? true }:
 	let
+		pathStr = toString path;
 		prefix = "#!${bash}/bin/bash\n" + ''
 			export PATH="${git}/bin:$PATH";
 		'';
@@ -23,8 +24,11 @@
 			in
 			''
 				echo "Exporting git revision ${commit}"
-				cd "${toString path}"
-				${archiveCommand}
+				if cd "${pathStr}"; then
+					${archiveCommand}
+				else
+					echo 'Unable to export ${pathStr}, pass `--option build-use-chroot false` to nix-build'
+				fi
 			''
 		;
 		
@@ -39,8 +43,12 @@
 				];
 				prefix = "${path}/.git";
 				fullPath = scope: "${prefix}/${scope}${ref}";
-				refScope = lib.findFirst (candidate: builtins.pathExists (fullPath candidate)) null candidates;
-				refPath = assert refScope != null; fullPath refScope;
+				fullCandidates = map fullPath candidates;
+				refPath =
+					let found = lib.findFirst builtins.pathExists null fullCandidates; in
+					if found == null
+						then abort "No git ref candidates found in ${builtins.toJSON fullCandidates}"
+						else found;
 				indirectPrefix = "ref: ";
 				resolve = refPath:
 					let result = lib.removeSuffix "\n" (builtins.readFile refPath); in

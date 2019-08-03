@@ -81,6 +81,10 @@ nix/wrangle-local.json: local deps
 TODO:
 - allow local overlays on global sources
   e.g. prefetch against a local git repo but publish with the public URL
+- add build option which runs:
+   - nix-build --show-trace -A src --option build-use-chroot false
+   - nix-build "$@"
+   - (this ensures we use chroot for everything but the `src` derivation)
 
 Use cases:
  - nix-wrangle splice: splice `self` into derivation base, to be used upstream (i.e. in nixpkgs)
@@ -200,7 +204,7 @@ parseAdd =
       
     buildGitLocal :: PackageName -> StringMapState (PackageName, Source.PackageSpec)
     buildGitLocal name = do
-      glPath <- buildPath
+      glPath <- buildPath -- TODO: default to `.`
       ref <- optionalAttrT "ref"
       packageSpec name $ Source.GitLocal $ Source.GitLocalSpec {
         Source.glPath,
@@ -357,7 +361,7 @@ parseCmdAdd = subcommand "Add a source" (cmdAdd <$> parseAdd <*> parseCommon)
   [ examplesDoc [
     "nix-wrangle add timbertson/opam2nix-packages",
     "nix-wrangle add --name pkgs nixos/nixpkgs-channels --ref nixos-unstable",
-    "nix-wrangle add self --type git-local --path ../"
+    "nix-wrangle add self --type git-local"
   ]]
 
 -- TODO: accept an optional second arg, and treat it as the "main" spec (i.e. owner/repo, url, or path depending on type)
@@ -579,5 +583,5 @@ let
     then fetch systemNixpkgs sourcesJson.pkgs else systemNixpkgs);
   _wrangle = fallback nix-wrangle (_pkgs.callPackage "${fetch _pkgs wrangleJson}/${wrangleJson.nix}" {});
 in
-(_wrangle.api { pkgs = _pkgs; }).inject { inherit provided; nix = ./nix; }
+(_wrangle.api { pkgs = _pkgs; }).inject { inherit provided; path = ./.; }
 |]

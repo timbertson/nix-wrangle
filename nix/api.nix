@@ -21,7 +21,7 @@ let
 					fullPath = relativePath: (
 						if path == null
 							then abort "relativePath only supported when using `inject` with a path"
-							else "${path}/${relativePath}"
+							else "${builtins.toString path}/${relativePath}"
 					);
 
 					finalArgs = if args ? relativePath
@@ -113,8 +113,8 @@ let
 							let
 								p = builtins.toString path;
 								candidates = [
-									"${p}/wrangle.json"
-									"${p}/wrangle-local.json"
+									"${p}/nix/wrangle.json"
+									"${p}/nix/wrangle-local.json"
 								];
 								present = filter builtins.pathExists candidates;
 							in
@@ -170,15 +170,14 @@ let
 
 		inject = {
 			# inject args
-			nix,
+			nix ? null, # optional if `path` given
 			provided ? {},
-			basePath ? null,
 
 			# callPackage args
 			args ? {},
 
 			# importFrom args
-			path ? null,
+			path ? null, # required if `nix` not given
 			sources ? null,
 
 			# pkgsOfImport args
@@ -189,7 +188,13 @@ let
 			let
 				isPath = p: builtins.typeOf p == "path";
 				# if nix _is_ a path, it can act as `path` argument too
-				path = if basePath == null && isPath nix then nix else null;
+				# we use toString to prevent actually importing `path`
+				pathStr =
+					# if `path` is not already in the store, we coerce it to a string
+					# so we don't auto-import it. Requires `--option build-use-chroot false`
+					if path == null then path else (if isStorePath path then path else builtins.toString path);
+				nixPath = (if nix != null then nix else "${pathStr}/nix");
+
 				imports = importFrom { inherit path sources extend; };
 
 				# If explicitly injected with e.g. `nixpkgs` and nix-wrangle, use those
@@ -199,7 +204,7 @@ let
 				pkgs = pkgsOfImport imports {inherit importArgs;
 					overlays = [injectedDepOverlay] ++ overlays;
 				};
-				base = pkgs.callPackage nix args;
+				base = pkgs.callPackage nixPath args;
 				selfSrc = imports.sources.self or null;
 			in
 			(if selfSrc == null then base else

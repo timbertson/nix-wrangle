@@ -14,6 +14,7 @@ import Prelude hiding (error)
 import Control.Applicative
 import Control.Monad
 import Control.Monad.Except (throwError)
+import Control.Monad.Catch (throwM)
 import Control.Monad.State
 import Data.Char (toUpper)
 import Data.Maybe (fromMaybe)
@@ -81,21 +82,10 @@ nix/wrangle-local.json: local deps
 TODO:
 - allow local overlays on global sources
   e.g. prefetch against a local git repo but publish with the public URL
-- add build option which runs:
+- AddSource build option which runs:
    - nix-build --show-trace -A src --option build-use-chroot false
    - nix-build "$@"
    - (this ensures we use chroot for everything but the `src` derivation)
-
-Use cases:
- - nix-wrangle splice: splice `self` into derivation base, to be used upstream (i.e. in nixpkgs)
- - nix-wrangle init: generate initial sources/wrangle.nix with wrangle and an optional pinned nixpkgs
- - nix-wrangle default-nix: generate default.nix
- - nix-wrangle show: dump current details
- - nix-wrangle show --update: compare current versions against "head" / latest releases
- - nix-wrangle rm name [--source local]
- - nix-wrangle add name --type github [--source public]
- - nix-wrangle update name [--source public] (if no args given, does an auto-update)
-
  -}
 
 newtype CommonOpts = CommonOpts {
@@ -155,7 +145,10 @@ defaultGitRef = "master"
 
 parseAdd :: Opts.Parser (Either AppError (PackageName, Source.PackageSpec))
 parseAdd =
-  mapLeft AppError <$> (build <$> Opts.optional parseName <*> Opts.optional parseSource <*> parsePackageAttrs)
+  mapLeft AppError <$> (build
+    <$> Opts.optional parseName
+    <*> Opts.optional parseSource
+    <*> parsePackageAttrs)
   where
     parseSource = Opts.argument Opts.str (Opts.metavar "SOURCE")
 
@@ -369,7 +362,7 @@ parseCmdInit = subcommand "Initialize nix-wrangle" (pure cmdInit) []
 
 cmdInit :: IO ()
 cmdInit = do
-  cmdAdd (Right (PackageName "nix-wrangle", spec)) commonOpts
+  cmdAdd OverwriteSource (Right (PackageName "nix-wrangle", spec)) commonOpts
   updateDefaultNix defaultNixOptsDefault
   where
     commonOpts = CommonOpts { sources = Nothing }
@@ -386,8 +379,11 @@ cmdInit = do
 -------------------------------------------------------------------------------
 -- Add
 -------------------------------------------------------------------------------
+
+data AddMode = AddSource | OverwriteSource
+
 parseCmdAdd :: Opts.ParserInfo (IO ())
-parseCmdAdd = subcommand "Add a source" (cmdAdd <$> parseAdd <*> parseCommon)
+parseCmdAdd = subcommand "Add a source" (cmdAdd <$> parseAddMode <*> parseAdd <*> parseCommon)
   [ examplesDoc [
     "nix-wrangle add timbertson/opam2nix-packages",
     "nix-wrangle add pkgs nixos/nixpkgs-channels --ref nixos-unstable",
@@ -395,10 +391,12 @@ parseCmdAdd = subcommand "Add a source" (cmdAdd <$> parseAdd <*> parseCommon)
     "nix-wrangle add pkgs --owner nixos --repo nixpkgs-channels --ref nixos-unstable",
     "nix-wrangle add --type git-local self .."
   ]]
+  where
+    parseAddMode = Opts.flag AddSource OverwriteSource
+      (Opts.long "replace" <> Opts.help "Replace existing source")
 
--- TODO: add --replace arg, and refuse to overwrite existing package unless given
-cmdAdd :: Either AppError (PackageName, Source.PackageSpec) -> CommonOpts -> IO ()
-cmdAdd addOpt opts =
+cmdAdd :: AddMode -> Either AppError (PackageName, Source.PackageSpec) -> CommonOpts -> IO ()
+cmdAdd addMode addOpt opts =
   do
     (name, inputSpec) <- liftEither addOpt
     putStrLn $ "Adding " <> show name <> " // " <> show inputSpec
@@ -410,6 +408,7 @@ cmdAdd addOpt opts =
     debugLn $ "source: " <> show source
     let (sourceFile, inputSource) = source
     let baseSource = fromMaybe (Source.emptyPackages) inputSource
+    checkAddMode addMode name baseSource
     spec <- Fetch.prefetch name inputSpec
     let modifiedSource = Source.add baseSource name spec
     Source.writeSourceFile sourceFile modifiedSource
@@ -422,6 +421,14 @@ cmdAdd addOpt opts =
         then Just $ Source.loadSourceFile f
         else Nothing
       return (f, loaded)
+
+    checkAddMode :: AddMode -> PackageName -> Source.Packages -> IO ()
+    checkAddMode mode name@(PackageName nameStr) existing =
+      if Source.member existing name then
+        case mode of
+          AddSource -> throwM $ AppError $ nameStr <> " already present, use --replace to replace it"
+          OverwriteSource -> infoLn $ "Replacing existing " <> nameStr
+      else return ()
 
 -------------------------------------------------------------------------------
 -- Rm

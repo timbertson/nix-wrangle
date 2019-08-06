@@ -220,7 +220,7 @@ parseAdd =
 
     buildGitLocal :: Maybe String -> PackageName -> StringMapState (PackageName, Source.PackageSpec)
     buildGitLocal source name = do
-      glPath <- buildPath source -- TODO: default to `.` for `self`
+      glPath <- buildPath source
       ref <- optionalAttrT "ref"
       packageSpec name $ Source.GitLocal $ Source.GitLocalSpec {
         Source.glPath,
@@ -396,7 +396,6 @@ parseCmdAdd = subcommand "Add a source" (cmdAdd <$> parseAdd <*> parseCommon)
     "nix-wrangle add --type git-local self .."
   ]]
 
--- TODO: accept an optional second arg, and treat it as the "main" spec (i.e. owner/repo, url, or path depending on type)
 -- TODO: add --replace arg, and refuse to overwrite existing package unless given
 cmdAdd :: Either AppError (PackageName, Source.PackageSpec) -> CommonOpts -> IO ()
 cmdAdd addOpt opts =

@@ -151,20 +151,24 @@ consumeAttrT key = StateT consume where
   consume = reshape . consumeAttr key
   reshape (result, map) = (\result -> (result, map)) <$> result
 
+defaultGitRef = "master"
+
 parseAdd :: Opts.Parser (Either AppError (PackageName, Source.PackageSpec))
 parseAdd =
-  mapLeft AppError <$> (build <$> Opts.optional parseName <*> parsePackageAttrs)
+  mapLeft AppError <$> (build <$> Opts.optional parseName <*> Opts.optional parseSource <*> parsePackageAttrs)
   where
-    build :: (Maybe PackageName) -> (StringMap) -> Either String (PackageName, Source.PackageSpec)
-    build nameOpt = evalStateT (modify' canonicalizeNix >> build' nameOpt)
+    parseSource = Opts.argument Opts.str (Opts.metavar "SOURCE")
 
-    build' :: Maybe PackageName -> StringMapState (PackageName, Source.PackageSpec)
-    build' nameOpt = typ >>= \case
-      Source.FetchGithub -> buildGithub nameOpt
-      (Source.FetchUrl urlType) -> name >>= buildUrl urlType
-      Source.FetchPath -> name >>= buildLocalPath
-      Source.FetchGitLocal -> name >>= buildGitLocal
-      Source.FetchGit -> name >>= buildGit
+    build :: Maybe PackageName -> Maybe String -> StringMap -> Either String (PackageName, Source.PackageSpec)
+    build nameOpt sourceOpt = evalStateT (modify' canonicalizeNix >> build' nameOpt sourceOpt)
+
+    build' :: Maybe PackageName -> Maybe String -> StringMapState (PackageName, Source.PackageSpec)
+    build' nameOpt sourceOpt = typ >>= \case
+      Source.FetchGithub -> buildGithub sourceOpt nameOpt
+      (Source.FetchUrl urlType) -> name >>= buildUrl urlType sourceOpt
+      Source.FetchPath -> name >>= buildLocalPath sourceOpt
+      Source.FetchGitLocal -> name >>= buildGitLocal sourceOpt
+      Source.FetchGit -> name >>= buildGit sourceOpt
       where
         typ :: StringMapState Source.FetchType
         typ = (consumeAttrT "type" <|> pure "github") >>= lift . Source.parseFetchType
@@ -184,43 +188,56 @@ parseAdd =
       other -> HMap.insert key other attrs
       where key = "nix"
 
-    buildPath :: StringMapState Source.LocalPath
-    buildPath = build <$> consumeAttrT "path" where
-      build path = if PosixPath.isAbsolute path
-        then Source.FullPath path
-        else Source.RelativePath path
+    buildPathOpt :: StringMapState (Maybe Source.LocalPath)
+    buildPathOpt = fmap pathOfString <$> optionalAttrT "path" where
 
-    buildLocalPath :: PackageName -> StringMapState (PackageName, Source.PackageSpec)
-    buildLocalPath name = buildPath >>= \path -> packageSpec name (Source.Path path)
+    buildPath :: Maybe String -> StringMapState Source.LocalPath
+    buildPath source =
+      buildPathOpt >>= \path -> lift $
+        toRight "--path or source required" (path <|> (pathOfString <$> source))
 
-    buildGit :: PackageName -> StringMapState (PackageName, Source.PackageSpec)
-    buildGit name = do
-      gitUrl <- consumeAttrT "url"
+    pathOfString :: String -> Source.LocalPath
+    pathOfString path = if PosixPath.isAbsolute path
+      then Source.FullPath path
+      else Source.RelativePath path
+
+    buildLocalPath :: Maybe String -> PackageName -> StringMapState (PackageName, Source.PackageSpec)
+    buildLocalPath source name = do
+      path <- buildPath source
+      packageSpec name (Source.Path path)
+
+    buildGit :: Maybe String -> PackageName -> StringMapState (PackageName, Source.PackageSpec)
+    buildGit source name = do
+      urlArg <- optionalAttrT "url"
       gitRef <- optionalAttrT "ref"
+      gitUrl <- lift $ toRight
+        ("--url or source required")
+        (urlArg <|> source)
       packageSpec name $ Source.Git $ Source.GitSpec {
         Source.gitUrl,
-        Source.gitRef = Source.Template (gitRef `orElse` "master")
+        Source.gitRef = Source.Template (gitRef `orElse` defaultGitRef)
       }
-      
-    buildGitLocal :: PackageName -> StringMapState (PackageName, Source.PackageSpec)
-    buildGitLocal name = do
-      glPath <- buildPath -- TODO: default to `.`
+
+    buildGitLocal :: Maybe String -> PackageName -> StringMapState (PackageName, Source.PackageSpec)
+    buildGitLocal source name = do
+      glPath <- buildPath source -- TODO: default to `.` for `self`
       ref <- optionalAttrT "ref"
       packageSpec name $ Source.GitLocal $ Source.GitLocalSpec {
         Source.glPath,
         Source.glRef = (Source.Template (ref `orElse` "HEAD"))
       }
 
-    buildUrl :: Source.UrlFetchType -> PackageName -> StringMapState (PackageName, Source.PackageSpec)
-    buildUrl urlType name = do
-      url <- consumeAttrT "url"
+    buildUrl :: Source.UrlFetchType -> Maybe String -> PackageName -> StringMapState (PackageName, Source.PackageSpec)
+    buildUrl urlType source name = do
+      urlAttr <- optionalAttrT "url"
+      url <- lift $ toRight "--url or souce required" (urlAttr <|> source)
       packageSpec name $ Source.Url Source.UrlSpec {
         Source.urlType = urlType,
         Source.url = Source.Template url
       }
 
-    buildGithub :: Maybe PackageName -> StringMapState (PackageName, Source.PackageSpec)
-    buildGithub name = do
+    buildGithub :: Maybe String -> Maybe PackageName -> StringMapState (PackageName, Source.PackageSpec)
+    buildGithub source name = do
       (name, ghOwner, ghRepo) <- identity
       ref <- optionalAttrT "ref"
       packageSpec name $ Source.Github Source.GithubSpec {
@@ -229,19 +246,32 @@ parseAdd =
         Source.ghRef = Source.Template . fromMaybe "master" $ ref
       }
       where
+        parseSource :: String -> Either String (PackageName, String, String)
+        parseSource source =
+          case span (/= '/') source of
+              (owner, '/':repo) -> Right (fromMaybe (PackageName repo) name, owner, repo)
+              _ -> throwError ("`" <> source <> "` doesn't look like a github repo")
+
+        explicitSource (owner, repo) = (fromMaybe (PackageName repo) name, owner, repo)
+
         identity :: StringMapState (PackageName, String, String)
         identity = do
           owner <- optionalAttrT "owner"
           repo <- optionalAttrT "repo"
-          lift $ case (name, owner, repo) of
-            (name, Just owner, Just repo) -> Right (fromMaybe (PackageName repo) name, owner, repo)
-            -- (Just name, Just owner, Nothing) -> Right (PackageName name, owner, name)
-            (Just (PackageName name), Nothing, Nothing) -> case span (/= '/') name of
-              (owner, '/':repo) -> Right (PackageName repo, owner, repo)
-              _ -> throwError ("`" <> name <> "` doesn't look like a github repo")
-            (Nothing, _, _) -> throwError "name or --owner/--repo required"
-            (_, Nothing, Just _) -> throwError "--owner required when using --repo"
-            (_, Just _, Nothing) -> throwError "--repo required when using --owner"
+          lift $ buildIdentity owner repo
+
+        buildIdentity :: Maybe String -> Maybe String -> Either String (PackageName, String, String)
+        buildIdentity owner repo = case (explicit, fromSource, fromName) of
+            (Just explicit, Nothing, _) -> Right explicit
+            (Nothing, Just source, _) -> source
+            (Nothing, Nothing, Just name) -> name
+            (Nothing, Nothing, Nothing) -> throwError "name, source or --owner/--repo required"
+            (Just _, Just _, _) -> throwError "use source or --owner/--repo, not both"
+          where
+            ownerAndRepo :: Maybe (String, String) = (,) <$> owner <*> repo
+            explicit :: Maybe (PackageName, String, String) = explicitSource <$> ownerAndRepo
+            fromSource = parseSource <$> source
+            fromName = parseSource <$> unPackageName <$> name
 
 parsePackageAttrs :: Opts.Parser (StringMap)
 parsePackageAttrs = HMap.fromList <$> many parseAttribute where
@@ -360,8 +390,10 @@ parseCmdAdd :: Opts.ParserInfo (IO ())
 parseCmdAdd = subcommand "Add a source" (cmdAdd <$> parseAdd <*> parseCommon)
   [ examplesDoc [
     "nix-wrangle add timbertson/opam2nix-packages",
-    "nix-wrangle add --name pkgs nixos/nixpkgs-channels --ref nixos-unstable",
-    "nix-wrangle add self --type git-local"
+    "nix-wrangle add pkgs nixos/nixpkgs-channels --ref nixos-unstable",
+    "nix-wrangle add pkgs nixos/nixpkgs-channels --ref nixos-unstable",
+    "nix-wrangle add pkgs --owner nixos --repo nixpkgs-channels --ref nixos-unstable",
+    "nix-wrangle add --type git-local self .."
   ]]
 
 -- TODO: accept an optional second arg, and treat it as the "main" spec (i.e. owner/repo, url, or path depending on type)

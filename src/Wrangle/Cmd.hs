@@ -357,16 +357,27 @@ requireConfiguredSources sources =
 -------------------------------------------------------------------------------
 -- Init
 -------------------------------------------------------------------------------
+data InitOpts = InitOpts {
+  nixpkgsChannel :: Maybe String
+}
 parseCmdInit :: Opts.ParserInfo (IO ())
-parseCmdInit = subcommand "Initialize nix-wrangle" (pure cmdInit) []
+parseCmdInit = subcommand "Initialize nix-wrangle" (
+  cmdInit <$> parseInit) []
+  where
+    parseInit = Opts.optional (Opts.strOption
+      ( Opts.long "pkgs" <>
+        Opts.short 'p' <>
+        Opts.metavar "CHANNEL" <>
+        Opts.help ("Pin nixpkgs to CHANNEL")
+      ))
 
-cmdInit :: IO ()
-cmdInit = do
-  cmdAdd OverwriteSource (Right (PackageName "nix-wrangle", spec)) commonOpts
+cmdInit :: Maybe String -> IO ()
+cmdInit nixpkgs = do
+  addMultiple OverwriteSource (Right (wrangleSpec : nixpkgsSpecs)) commonOpts
   updateDefaultNix defaultNixOptsDefault
   where
     commonOpts = CommonOpts { sources = Nothing }
-    spec = Source.PackageSpec {
+    wrangleSpec = (PackageName "nix-wrangle", Source.PackageSpec {
       Source.sourceSpec = Source.Github Source.GithubSpec {
         Source.ghOwner = "timbertson",
         Source.ghRepo = "nix-wrangle",
@@ -374,7 +385,18 @@ cmdInit = do
       },
       Source.fetchAttrs = HMap.empty,
       Source.packageAttrs = HMap.fromList [("nix", "default.nix")]
-    }
+    })
+    nixpkgsSpecs = case nixpkgs of
+      Nothing -> []
+      Just channel -> [(PackageName "pkgs", Source.PackageSpec {
+      Source.sourceSpec = Source.Github Source.GithubSpec {
+        Source.ghOwner = "NixOS",
+        Source.ghRepo = "nixpkgs-channels",
+        Source.ghRef = Source.Template channel
+      },
+      Source.fetchAttrs = HMap.empty,
+      Source.packageAttrs = HMap.fromList [("nix", "default.nix")]
+    })]
 
 -------------------------------------------------------------------------------
 -- Add
@@ -395,11 +417,10 @@ parseCmdAdd = subcommand "Add a source" (cmdAdd <$> parseAddMode <*> parseAdd <*
     parseAddMode = Opts.flag AddSource OverwriteSource
       (Opts.long "replace" <> Opts.help "Replace existing source")
 
-cmdAdd :: AddMode -> Either AppError (PackageName, Source.PackageSpec) -> CommonOpts -> IO ()
-cmdAdd addMode addOpt opts =
+addMultiple :: AddMode -> Either AppError [(PackageName, Source.PackageSpec)] -> CommonOpts -> IO ()
+addMultiple addMode addOpts opts =
   do
-    (name, inputSpec) <- liftEither addOpt
-    putStrLn $ "Adding " <> show name <> " // " <> show inputSpec
+    addSpecs <- liftEither $ addOpts
     configuredSources <- Source.configuredSources $ sources opts
     let sourceFile = NonEmpty.head <$> configuredSources
     debugLn $ "sourceFile: " <> show sourceFile
@@ -408,11 +429,16 @@ cmdAdd addMode addOpt opts =
     debugLn $ "source: " <> show source
     let (sourceFile, inputSource) = source
     let baseSource = fromMaybe (Source.emptyPackages) inputSource
-    checkAddMode addMode name baseSource
-    spec <- Fetch.prefetch name inputSpec
-    let modifiedSource = Source.add baseSource name spec
+    modifiedSource <- foldM addSingle baseSource addSpecs
     Source.writeSourceFile sourceFile modifiedSource
   where
+    addSingle :: Source.Packages -> (PackageName, Source.PackageSpec) -> IO Source.Packages
+    addSingle base (name, inputSpec) = do
+      putStrLn $ "Adding " <> show name <> " // " <> show inputSpec
+      checkAddMode addMode name base
+      spec <- Fetch.prefetch name inputSpec
+      return $ Source.add base name spec
+
     tryLoadSource :: Source.SourceFile -> IO (Source.SourceFile, Maybe Source.Packages)
     -- TODO: arrows?
     tryLoadSource f = do
@@ -429,6 +455,9 @@ cmdAdd addMode addOpt opts =
           AddSource -> throwM $ AppError $ nameStr <> " already present, use --replace to replace it"
           OverwriteSource -> infoLn $ "Replacing existing " <> nameStr
       else return ()
+
+cmdAdd :: AddMode -> Either AppError (PackageName, Source.PackageSpec) -> CommonOpts -> IO ()
+cmdAdd addMode addOpt opts = addMultiple addMode ((\x -> [x]) <$> addOpt) opts
 
 -------------------------------------------------------------------------------
 -- Rm

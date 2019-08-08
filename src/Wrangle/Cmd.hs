@@ -70,24 +70,6 @@ softDocLines lines = foldr (<>) Doc.empty (intersperse Doc.softline lines)
 
 examplesDoc ex = Opts.footerDoc $ Just $ docLines ["Examples:", Doc.indent 2 $ docLines ex]
 
-{-
-
-Planned commands / terminology:
-
-nix/default.nix: derivation base. Contains deps & build instructions but not src
-default.nix: concrete derivation: bakes in version of nixpkgs, self & wrangle
-nix/wrangle.json: public deps
-nix/wrangle-local.json: local deps
-
-TODO:
-- allow local overlays on global sources
-  e.g. prefetch against a local git repo but publish with the public URL
-- AddSource build option which runs:
-   - nix-build --show-trace -A src --option build-use-chroot false
-   - nix-build "$@"
-   - (this ensures we use chroot for everything but the `src` derivation)
- -}
-
 newtype CommonOpts = CommonOpts {
   sources :: Maybe (NonEmpty Source.SourceFile)
 } deriving newtype Show

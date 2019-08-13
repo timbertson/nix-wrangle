@@ -80,7 +80,7 @@
 		'';
 
 		name = (if unpack then "git-export" else "git-export.tar.gz");
-		commitRequired = assert "exactly one of commit, ref or workingChanges required"; null;
+		commitRequired = abort "exactly one of commit, ref or workingChanges required";
 
 		commitDrv = stdenv.mkDerivation { inherit name; buildCommand = prefix + exportCommitScript commit; };
 		refDrv = stdenv.mkDerivation { inherit name; buildCommand = prefix + exportRefScript ref; };

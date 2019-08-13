@@ -20,7 +20,7 @@ import Data.Char (toUpper)
 import Data.Maybe (fromMaybe)
 import Data.List (partition, intercalate, intersperse)
 import Data.List.NonEmpty (NonEmpty(..))
-import Wrangle.Source (PackageName(..), StringMap)
+import Wrangle.Source (PackageName(..), StringMap, asString)
 import Wrangle.Util
 import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.HashMap.Strict as HMap
@@ -52,6 +52,7 @@ parseCommand = Opts.subparser (
   Opts.command "update" parseCmdUpdate <>
   Opts.command "splice" parseCmdSplice <>
   Opts.command "show" parseCmdShow <>
+  Opts.command "prebuild" parseCmdPrebuild <>
   Opts.command "ls" parseCmdLs <>
   Opts.command "default-nix" parseCmdDefaultNix
   )
@@ -337,6 +338,47 @@ requireConfiguredSources sources =
     (liftMaybe (AppError "No wrangle JSON files found"))
 
 -------------------------------------------------------------------------------
+-- Prebuild
+-------------------------------------------------------------------------------
+data PrebuildMode = PrebuildAll | PrebuildDefault
+
+parseCmdPrebuild :: Opts.ParserInfo (IO ())
+parseCmdPrebuild = subcommand "Prebuild local sources" (cmdPrebuild <$> parseCommon <*> parsePrebuildMode <*> parseNames) []
+  where
+    parsePrebuildMode :: Opts.Parser PrebuildMode
+    parsePrebuildMode = Opts.flag PrebuildAll PrebuildDefault
+      ( Opts.long "all" <>
+        Opts.short 'a' <>
+        Opts.help "Build all sources, not just local ones"
+      )
+
+cmdPrebuild :: CommonOpts -> PrebuildMode -> Maybe (NonEmpty PackageName) -> IO ()
+cmdPrebuild opts explicitMode packageNamesOpt = do
+  processPackagesNamed packageNamesOpt opts $ \sourceFile sources packageNames -> do
+    infoLn $ "Prebuilding " <> Source.pathOfSource sourceFile <> " ..."
+    sequence_ $ map (prebuildSingle sources) packageNames
+  where
+    mode = case packageNamesOpt of
+      (Just _) -> PrebuildAll
+      Nothing -> explicitMode
+    prebuildSingle packages name =
+      (liftEither $ Source.lookup name packages) >>= prebuildPackage name
+    prebuildPackage name pkg =
+      case (mode, Source.sourceSpec pkg) of
+      -- local paths can't be prebuilt since they're not a derivation,
+      -- but they also don't need it.
+      (_, Source.Path _) -> logSkip infoLn
+      (PrebuildAll, _) -> prebuild
+      (PrebuildDefault, Source.GitLocal _) -> prebuild
+      (PrebuildDefault, _) -> logSkip debugLn
+      where
+        typeStr = Source.fetcherNameWrangle . Source.fetchType . Source.sourceSpec $ pkg
+        logSkip printer = printer $ "Skipping: " <> asString name <> " ("<> typeStr<>")"
+        prebuild = do
+          infoLn $ "Building: " <> asString name <> " ("<>typeStr<>")"
+          Fetch.prebuild pkg
+
+-------------------------------------------------------------------------------
 -- Init
 -------------------------------------------------------------------------------
 data InitOpts = InitOpts {
@@ -483,13 +525,15 @@ cmdUpdate packageNamesOpt updateAttrs opts =
       else return ()
     return $ Source.add packages name fetched
 
--- shared by update/rm
-alterPackagesNamed :: Maybe (NonEmpty PackageName) -> CommonOpts -> (Source.Packages -> PackageName -> IO Source.Packages)-> IO ()
-alterPackagesNamed packageNamesOpt opts updateSingle = do
+-- shared by update/rm/prebuild
+-- TODO: pass actual source, since it is always Just
+processPackagesNamed :: Maybe (NonEmpty PackageName) -> CommonOpts
+  -> (Source.SourceFile -> Source.Packages -> [PackageName] -> IO ())-> IO ()
+processPackagesNamed packageNamesOpt opts process = do
   sourceFiles <- requireConfiguredSources $ sources opts
   sources <- sequence $ loadSource <$> sourceFiles
   checkMissingKeys (snd <$> sources)
-  sequence_ $ updateSources <$> sources
+  sequence_ $ traverseSources <$> sources
   where
     checkMissingKeys :: NonEmpty Source.Packages -> IO ()
     checkMissingKeys sources = case missingKeys of
@@ -503,14 +547,20 @@ alterPackagesNamed packageNamesOpt opts updateSingle = do
       Nothing -> (Source.keys sources, [])
       (Just names) -> partition (Source.member sources) (NonEmpty.toList names)
     
-    updateSources :: (Source.SourceFile, Source.Packages) -> IO ()
-    updateSources (sourceFile, sources) = do
-      infoLn $ "Updating "<> Source.pathOfSource sourceFile <> " ..."
+    traverseSources :: (Source.SourceFile, Source.Packages) -> IO ()
+    traverseSources (sourceFile, sources) = do
       let (packageNames, _) = partitionPackageNames sources
       debugLn $ "Package names: " <> (show packageNames)
-      updated <- foldM updateSingle sources packageNames
-      Source.writeSourceFile sourceFile updated
+      process sourceFile sources packageNames
 
+-- shared by update/rm
+alterPackagesNamed :: Maybe (NonEmpty PackageName) -> CommonOpts -> (Source.Packages -> PackageName -> IO Source.Packages)-> IO ()
+alterPackagesNamed packageNamesOpt opts updateSingle =
+  processPackagesNamed packageNamesOpt opts $ \sourceFile sources packageNames -> do
+    infoLn $ "Updating "<> Source.pathOfSource sourceFile <> " ..."
+    updated <- foldM updateSingle sources packageNames
+    Source.writeSourceFile sourceFile updated
+    
 loadSource :: Source.SourceFile -> IO (Source.SourceFile, Source.Packages)
 loadSource f = (,) f <$> Source.loadSourceFile f
 

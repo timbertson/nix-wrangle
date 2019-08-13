@@ -10,15 +10,34 @@ import Control.Applicative (liftA2)
 import Control.DeepSeq (($!!))
 import Data.Aeson (toJSON)
 import Data.List (intercalate)
+import Data.List.NonEmpty (NonEmpty(..))
 import Data.Maybe (mapMaybe, listToMaybe)
 import Data.Char (isSpace)
 import Text.Regex.TDFA
+import System.Environment (lookupEnv, getExecutablePath)
+import System.FilePath.Posix ((</>), takeDirectory)
 import Wrangle.Util
 import Wrangle.Source
 import qualified GHC.IO.Handle as H
 import qualified Data.HashMap.Strict as HMap
+import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.Text as T
 import qualified System.Process as P
+import qualified System.Directory as Dir
+
+prebuild :: PackageSpec -> IO ()
+prebuild (PackageSpec { sourceSpec, fetchAttrs }) = do
+  apiContext <- globalApiContext
+  let cmd = extendCmd $
+            nixBuildCommand apiContext (fetchType sourceSpec) (HMap.toList fetchAttrs)
+  debugLn $ "+ " <> (show $ NonEmpty.toList cmd)
+  P.callProcess (NonEmpty.head cmd) (NonEmpty.tail cmd)
+  where
+    disableChroot = ("--option" :| ["build-use-chroot", "false"])
+    extendCmd base = case sourceSpec of
+      -- local builds require chroot disabled
+      (GitLocal _) -> base <> disableChroot
+      _ -> base
 
 prefetch :: PackageName -> PackageSpec -> IO PackageSpec
 prefetch name pkg = do
@@ -143,37 +162,57 @@ resolveGitRef remote refName = do
 shaLen = 52
 dummySHA256 = concat $ replicate shaLen "0"
 
+nixBuildCommand :: NixApiContext -> FetchType -> [(String,String)] -> NonEmpty String
+nixBuildCommand (NixApiContext { apiNix, projectRoot }) fetchType attrs
+  = exe :| args
+  where
+    fetcherName = fetcherNameWrangle fetchType
+    fetchJSON = encodeOnelineString . toJSON . HMap.fromList $ attrs
+    fetchExpr = intercalate "\n" [
+      "{fetchJSON, apiPath, path}:",
+      "let api = (import <nixpkgs> {}).callPackage apiPath {}; in",
+      "(api.internal.makeFetchers { inherit path; })."<>fetcherName<>" (builtins.fromJSON fetchJSON)"]
+    exe = "nix-build"
+    args = [
+      "--no-out-link",
+      "--show-trace",
+      "--argstr", "fetchJSON", fetchJSON,
+      "--argstr", "path", projectRoot,
+      "--argstr", "apiPath", apiNix,
+      "--expr", fetchExpr]
+
+data NixApiContext = NixApiContext {
+  apiNix :: FilePath,
+  projectRoot :: FilePath
+}
+
+globalApiContext :: IO NixApiContext
+globalApiContext = do
+  declaredDataDir <- lookupEnv "NIX_WRANGLE_DATA"
+  dataDir <- case declaredDataDir of
+    (Just dir) -> return dir
+    Nothing -> (\base -> (takeDirectory base) </> ".." </> ".." </> "..") <$> getExecutablePath
+  debugLn $ "using NIX_WRANGLE_DATA directory " <> dataDir
+  let apiNix = dataDir </> "nix" </> "api.nix"
+  projectRoot <- Dir.getCurrentDirectory
+  return $ NixApiContext { apiNix, projectRoot }
+
 -- This supports arbitrary prefetching without worrying about nix-prefetch-*.
 -- It's slightly inefficient since it results in two downloads of a file,
 -- but it's very reliable regardless of fetch method.
 prefetchSha256 :: FetchType -> [(String,String)] -> IO Sha256
 prefetchSha256 fetchType attrs = do
-  let wrangleFetcher = fetcherNameWrangle fetchType
-  debugLn $ "prefetching "<> wrangleFetcher <> " digest"
-  nixFetcher <- liftEither $ fetcherNameNix fetchType
-  runCmd nixFetcher
+  apiContext <- globalApiContext
+  let cmd = nixBuildCommand apiContext fetchType attrs
+  debugLn $ "+ " <> (show $ NonEmpty.toList cmd)
+  errText <- runProcessOutput Stderr (processSpec cmd)
+  sequence_ $ map debugLn $ lines errText
+  liftEither $ extractExpectedDigest errText
   where
-    runCmd nixFetcher = do
-      debugLn $ "+ " <> (show $ exe : args)
-      errText <- runProcessOutput Stderr processSpec
-      sequence_ $ map debugLn $ lines errText
-      liftEither $ extractExpectedDigest errText
-      where
-      fetchExpr = intercalate " " [
-        "{fetchJSON}:",
-        "(import <nixpkgs> {})." <> nixFetcher,
-        "(builtins.fromJSON fetchJSON)"]
-      fetchJSON = encodeOnelineString . toJSON . HMap.fromList $ ("sha256", dummySHA256) : attrs
-      exe = "nix-build"
-      args = [
-        "--no-out-link",
-        "--argstr", "fetchJSON", fetchJSON,
-        "--expr", fetchExpr]
-
-      processSpec = (P.proc exe args) {
-        P.std_in = P.NoStream,
-        P.std_out = P.NoStream,
-        P.std_err = P.CreatePipe }
+    processSpec cmd = (P.proc (NonEmpty.head cmd) (NonEmpty.tail cmd)) {
+      P.std_in = P.NoStream,
+      P.std_out = P.NoStream,
+      P.std_err = P.CreatePipe }
 
 -- Thanks https://github.com/seppeljordan/nix-prefetch-github/blob/cd9708fcdf033874451a879ac5fe68d7df930b7e/src/nix_prefetch_github/__init__.py#L124
 -- For the future, note SRI: https://github.com/NixOS/nix/commit/6024dc1d97212130c19d3ff5ce6b1d102837eee6

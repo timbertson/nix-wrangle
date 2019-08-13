@@ -7,13 +7,13 @@ build-type:     Simple
 executable nix-wrangle
   main-is: Main.hs
   other-modules:
-      Wrangle.Cmd
-      Wrangle.Source
-      Wrangle.Util
-      Wrangle.Splice
-      Wrangle.Fetch
+    Wrangle.Cmd
+    Wrangle.Source
+    Wrangle.Util
+    Wrangle.Splice
+    Wrangle.Fetch
   hs-source-dirs:
-      ./src
+    ./src
   ghc-options: -Wall -Werror -fno-warn-name-shadowing -fno-warn-missing-signatures
   build-depends:
     -- basics

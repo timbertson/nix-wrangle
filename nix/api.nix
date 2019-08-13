@@ -35,7 +35,7 @@ let
 			url = fetchurl;
 			git = fetchgit;
 			git-local = withRelativePath exportLocalGit;
-			path = withRelativePath ({ path }: path);
+			path = withRelativePath ({ path }: "${path}");
 		};
 
 		implAttrPaths = node: map (splitString ".") (node.attrs.attrPaths or [node.name]);

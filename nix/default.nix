@@ -4,6 +4,7 @@
 	src = abort "`src` not overridden";
 	nativeBuildInputs = (o.nativeBuldInputs or []) ++ [makeWrapper];
 	installPhase = o.installPhase + ''
+		mkdir -p "$out/share"
 		cp -r "$src/nix" "$out/share/nix"
 		wrapProgram $out/bin/nix-wrangle \
 			--prefix PATH : ${git}/bin \

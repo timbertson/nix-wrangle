@@ -118,21 +118,21 @@ let
 		}).version.extra)
 
 		(eq "inject works with just a path" ./samplePackage/upstream-src
-			(api.inject { nix = ./samplePackage; }).src)
+			(api.inject { path = ./samplePackage; }).src)
 
 		(eq "inject works with an attrset and no `self`" ./samplePackage/upstream-src (
 			api.inject {
 				sources = [ version ];
-				nix = ({ pkgs, version }: pkgs.callPackage ./samplePackage/default.nix {});
+				nix = ({ pkgs, version }: pkgs.callPackage ./samplePackage/nix {});
 			}
 		).src)
 
-		(eq "inject overrides src if `self` is given" ./samplePackage/local-src (
+		(eq "inject overrides src if `self` is given" "${./samplePackage/local-src}" (
 			api.inject {
 				sources = [ version (addHeader {
 					sources.self = { type = "path"; fetch = { path = ./samplePackage/local-src; }; };
 				})];
-				nix = ({ pkgs, version }: pkgs.callPackage ./samplePackage/default.nix {});
+				nix = ({ pkgs, version }: pkgs.callPackage ./samplePackage/nix {});
 			}
 		).src)
 

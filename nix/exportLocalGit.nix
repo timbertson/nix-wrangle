@@ -6,7 +6,9 @@
 
 { path, commit ? null, ref ? null, workingChanges ? false, unpack ? true }:
 	let
-		pathStr = toString path;
+		pathStr = toString path; in
+	let
+		path = pathStr; # shadow, so we can't accidentally import `path`
 		prefix = "#!${bash}/bin/bash\n" + ''
 			export PATH="${git}/bin:$PATH";
 		'';
@@ -24,10 +26,10 @@
 			in
 			''
 				echo "Exporting git revision ${commit}"
-				if cd "${pathStr}"; then
+				if cd "${path}"; then
 					${archiveCommand}
 				else
-					echo 'Unable to export ${pathStr}, pass `--option build-use-chroot false` to nix-build'
+					echo 'Unable to export ${path}, pass `--option build-use-chroot false` to nix-build'
 				fi
 			''
 		;
@@ -63,7 +65,7 @@
 
 		# workingChanges: produces an impure derivation
 		exportWorkingChangesScript = ''
-			cd "${toString path}"
+			cd "${path}"
 			commit="$(env \
 				GIT_AUTHOR_NAME="nobody" \
 				GIT_AUTHOR_EMAIL="nobody@example.org" \

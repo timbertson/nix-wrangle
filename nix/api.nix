@@ -18,10 +18,12 @@ let
 				# inject support for `relativePath` as long as
 				# we were invoked with a base path
 				let
-					fullPath = relativePath: (
+					fromStore = lib.isStorePath path;
+					basePath = if fromStore then path else builtins.toString path;
+					fullPath = relativePath: lib.warn "relativizing ${builtins.toString relativePath} against ${builtins.toString path}" (
 						if path == null
 							then abort "relativePath only supported when using `inject` with a path"
-							else "${builtins.toString path}/${relativePath}"
+							else "${basePath}/${relativePath}"
 					);
 
 					finalArgs = if args ? relativePath
@@ -29,7 +31,12 @@ let
 							(filterAttrs (n: v: n != "relativePath") args)
 						else args;
 				in
-				fn finalArgs;
+				# if we're fetching anything from a path which is already in the store,
+				# short-circuit and just use that path
+				if fromStore then
+					finalArgs.path
+				else
+					fn finalArgs;
 			in {
 			github = fetchFromGitHub;
 			url = fetchurl;

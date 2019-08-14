@@ -71,6 +71,19 @@ let
 
 		["makes derivations" (isDerivation (api.derivations { sources = [ version ]; }).version)]
 
+		(eq "imports from git when path is not a store path" (
+			let result = ((internal.makeFetchers { path = ./storeSrc; })
+				.git-local { relativePath = "."; ref="HEAD"; }); in
+			[(typeOf result) (isDerivation result)]
+		) ["set" true])
+
+		(eq "uses store path directly path is a store path" (
+			# "${x}" copies path x into the store
+			let result = ((internal.makeFetchers { path = "${./storeSrc}"; })
+				.git-local { relativePath = "."; ref="HEAD"; }); in
+			[(typeOf result) (isDerivation result) result]
+		) ["string" false "${./storeSrc}/."])
+
 		(eq "importFrom merges packages, not recursively" (
 			(api.importFrom { sources = [
 				(addHeader { sources = {

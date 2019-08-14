@@ -653,7 +653,8 @@ updateDefaultNix (DefaultNixOpts { force }) = do
     contents = T.unlines [
       markerText,
       "# It can be regenerated with `nix-wrangle default-nix`",
-      defaultNixContents ]
+      defaultNixContents,
+      ""] -- trailing newline
 
     shouldWriteFile :: IO Bool
     shouldWriteFile = do

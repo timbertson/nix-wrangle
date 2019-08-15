@@ -8,7 +8,7 @@
 		cp -r "$src/nix" "$out/share/nix"
 		wrapProgram $out/bin/nix-wrangle \
 			--prefix PATH : ${git}/bin \
-			--set NIX_WRANGLE_DATADIR "$out/share"
+			--set NIX_WRANGLE_DATA "$out/share"
 	'';
 	passthru = (o.passthru or {}) // {
 		api = args: callPackage (../nix + "/api.nix") args;

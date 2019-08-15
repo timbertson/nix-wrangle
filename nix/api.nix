@@ -20,11 +20,10 @@ let
 				let
 					fromStore = lib.isStorePath path;
 					basePath = if fromStore then path else builtins.toString path;
-					fullPath = relativePath: lib.warn "relativizing ${builtins.toString relativePath} against ${builtins.toString path}" (
+					fullPath = relativePath:
 						if path == null
 							then abort "relativePath only supported when using `inject` with a path"
-							else "${basePath}/${relativePath}"
-					);
+							else "${basePath}/${relativePath}";
 
 					finalArgs = if args ? relativePath
 						then { path = fullPath args.relativePath; } //

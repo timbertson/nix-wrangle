@@ -203,7 +203,7 @@ globalApiContext = do
 prefetchSha256 :: FetchType -> [(String,String)] -> IO Sha256
 prefetchSha256 fetchType attrs = do
   apiContext <- globalApiContext
-  let cmd = nixBuildCommand apiContext fetchType attrs
+  let cmd = nixBuildCommand apiContext fetchType $ ("sha256", dummySHA256) : attrs
   debugLn $ "+ " <> (show $ NonEmpty.toList cmd)
   errText <- runProcessOutput Stderr (processSpec cmd)
   sequence_ $ map debugLn $ lines errText

@@ -20,6 +20,7 @@ import Data.Char (toUpper)
 import Data.Maybe (fromMaybe)
 import Data.List (partition, intercalate, intersperse)
 import Data.List.NonEmpty (NonEmpty(..))
+import System.Exit (exitFailure)
 import Wrangle.Source (PackageName(..), StringMap, asString)
 import Wrangle.Util
 import qualified Data.List.NonEmpty as NonEmpty
@@ -37,8 +38,9 @@ import qualified Options.Applicative.Help.Pretty as Doc
 import qualified System.FilePath.Posix as PosixPath
 
 main :: IO ()
-main = join $ Opts.execParser opts where
+main = join $ Opts.customExecParser prefs opts where
   opts = Opts.info (parseCommand <**> Opts.helper) $ mconcat desc
+  prefs = Opts.prefs Opts.showHelpOnEmpty
   desc =
     [ Opts.fullDesc
     , Opts.header "Nix-wrangle - source & dependency manager for Nix projects"
@@ -55,6 +57,10 @@ parseCommand = Opts.subparser (
   Opts.command "prebuild" parseCmdPrebuild <>
   Opts.command "ls" parseCmdLs <>
   Opts.command "default-nix" parseCmdDefaultNix
+  ) <|> Opts.subparser (
+    (Opts.command "installcheck"
+      (subcommand "postinstall check" (pure cmdInstallCheck) []))
+    <> Opts.internal
   )
 
 subcommand desc action infoMod =
@@ -685,3 +691,14 @@ let
 in
 (_wrangle.api { pkgs = _pkgs; }).inject { inherit provided; path = ./.; }
 |]
+
+cmdInstallCheck :: IO ()
+cmdInstallCheck = do
+  apiContext <- Fetch.globalApiContext
+  let apiPath = Fetch.apiNix apiContext
+  infoLn $ "checking for nix API at "<>apiPath
+  apiExists <- Dir.doesFileExist apiPath
+  if not apiExists
+    then exitFailure
+    else return ()
+  infoLn "ok"

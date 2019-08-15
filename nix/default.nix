@@ -9,6 +9,7 @@
 		wrapProgram $out/bin/nix-wrangle \
 			--prefix PATH : ${git}/bin \
 			--set NIX_WRANGLE_DATA "$out/share"
+		$out/bin/nix-wrangle installcheck
 	'';
 	passthru = (o.passthru or {}) // {
 		api = args: callPackage (../nix + "/api.nix") args;

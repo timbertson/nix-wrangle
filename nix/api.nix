@@ -20,22 +20,21 @@ let
 				let
 					fromStore = lib.isStorePath path;
 					basePath = if fromStore then path else builtins.toString path;
-					fullPath = relativePath:
+					joinPath = relativePath:
 						if path == null
 							then abort "relativePath only supported when using `inject` with a path"
 							else "${basePath}/${relativePath}";
-
-					finalArgs = if args ? relativePath
-						then { path = fullPath args.relativePath; } //
-							(filterAttrs (n: v: n != "relativePath") args)
-						else args;
 				in
-				# if we're fetching anything from a path which is already in the store,
-				# short-circuit and just use that path
-				if fromStore then
-					finalArgs.path
-				else
-					fn finalArgs;
+				if args ? relativePath then (
+					# if we're fetching anything from a path which is already in the store,
+					# short-circuit and just use that path
+					let fullPath = joinPath args.relativePath; in
+					if fromStore
+						then fullPath
+						else fn ({ path = fullPath; } // (filterAttrs (n: v: n != "relativePath") args))
+				) else (
+					fn args
+				);
 			in {
 			github = fetchFromGitHub;
 			url = fetchurl;

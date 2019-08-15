@@ -9,4 +9,3 @@ let
   _wrangle = _pkgs.callPackage ./nix {};
 in
 (_wrangle.api { pkgs = _pkgs; }).inject { inherit provided; path = ./.; }
-

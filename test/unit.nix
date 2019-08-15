@@ -63,11 +63,10 @@ let
 
 		(eq "passthru attrs" (makeImport "name" versionSrc).attrs versionSrc)
 
-		["overlay is valid"
-			(isDerivation ((makeImport "pythonPackages.versionOverride" versionSrc).overlay
-				{inherit callPackage;} # self
-				{} # super
-			).pythonPackages.versionOverride)]
+		["mergeImportsInto produces valid derivations"
+			(isDerivation (internal.mergeImportsInto pkgs {
+				sources.version = (makeImport "pythonPackages.versionOverride" versionSrc);
+			}).pythonPackages.versionOverride)]
 
 		["makes derivations" (isDerivation (api.derivations { sources = [ version ]; }).version)]
 
@@ -101,22 +100,22 @@ let
 				second = { type="git"; key = "value2"; };
 			})
 
-		(eq "overlay merges up to attr path"
-			(
-				let result = ((makeImport "a.b.c.version" versionSrc).overlay
-					{inherit callPackage;} # self
-					{ # super
-						a.b.c = {
-							d = lib.const 1;
-							version = {
-								e = "super";
-								src = lib.warn "evaluating `const 1`" (const 1);
-							};
+		(eq "mergeImportsInto merges up to attr path"
+			(let
+				base = {
+					a.b.c = {
+						d = lib.const 1;
+						version = {
+							e = "super";
+							src = lib.warn "evaluating `const 1`" (const 1);
 						};
-					}
-				); in
-			(attrNames result.a.b.c) ++ ([result.a.b.c.version.src.drvPath]))
-			["d" "version" ((makeImport "name" versionSrc).src.drvPath)]
+					};
+				};
+				result = internal.mergeImportsInto base {
+					sources.version = (makeImport "a.b.c.version" versionSrc);
+				};
+			in (attrNames result.a.b.c) ++ [(result.a.b.c.version ? e) result.a.b.c.version.src.drvPath])
+			["d" "version" false ((makeImport "name" versionSrc).src.drvPath)]
 		)
 
 		(eq "allows overriding of individual package invocations" "injected" (api.derivations {

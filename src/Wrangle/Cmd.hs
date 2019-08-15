@@ -677,7 +677,7 @@ let
   sourcesJson = (builtins.fromJSON (builtins.readFile ./nix/wrangle.json)).sources;
   wrangleJson = sourcesJson.nix-wrangle or (abort "No nix-wrangle entry in nix/wrangle.json");
 in
-{ pkgs ? null, nix-wrangle ? null }@provided:
+{ pkgs ? null, nix-wrangle ? null, ... }@provided:
 let
   _pkgs = fallback pkgs (if builtins.hasAttr "pkgs" sourcesJson
     then fetch systemNixpkgs sourcesJson.pkgs else systemNixpkgs);

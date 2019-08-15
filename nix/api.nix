@@ -44,14 +44,27 @@ let
 			path = withRelativePath ({ path }: "${path}");
 		};
 
-		implAttrPaths = node: map (splitString ".") (node.attrs.attrPaths or [node.name]);
+		implAttrPaths = node:
+			map (splitString ".") (node.attrs.attrPaths or [node.name]);
 
 		implAttrset = node: impl:
 		let
 			paths = implAttrPaths node;
 			attrs = map (path: setAttrByPath path impl) paths;
 		in
-		foldr recursiveUpdate {} attrs;
+		foldl recursiveUpdate {} attrs;
+
+		mergeImportsInto = pkgs: imports:
+			let mergeFn = base: node:
+				# convert each node into a sparse recursive attrset
+				# and merge into base recursively
+				let
+					addition = internal.implAttrset node node.drv;
+					paths = internal.implAttrPaths node;
+				in
+				recursiveUpdateUntil (path: l: r: elem path paths) base addition;
+			in
+			foldl mergeFn pkgs (attrValues imports.sources);
 
 		makeImport = settings: name: attrs:
 			let
@@ -78,15 +91,7 @@ let
 							drv = callImpl args;
 						});
 				drv = callWith { pkgs = _nixpkgs; path = nix; };
-				overlay = (self: super:
-					let
-						impl = callWith { pkgs = self; path = nix; };
-						addition = implAttrset node impl;
-						paths = implAttrPaths node;
-					in
-					recursiveUpdateUntil (path: l: r: elem path paths) super addition
-				);
-				node = { inherit name attrs src version nix overlay drv; };
+				node = { inherit name attrs src version nix drv; };
 			in
 			node
 		;
@@ -134,7 +139,7 @@ let
 			# We could return those at the toplevel, but this lets us add more
 			# attributes later if needed.
 			jsonSourcesList = map (j: j.sources) jsonList;
-			jsonSources = lib.foldr (a: b: a // b) {} jsonSourcesList;
+			jsonSources = lib.foldl (a: b: a // b) {} jsonSourcesList;
 			jsonSourcesExtended = if extend == null then jsonSources else (
 				# extend only acts on `sources`, not the full attrset
 				recursiveUpdate jsonSources (extend jsonSources)
@@ -146,31 +151,6 @@ let
 			# map `sources` into imports instead of plain attrs
 			sources = importsOfJson { inherit path; } jsonSourcesExtended;
 		};
-
-		overlaysOfImport = imports:
-			map (node: node.overlay) (attrValues imports.sources);
-
-		pkgsOfImport = imports: {
-			overlays ? [],
-			importArgs ? {},
-		}:
-		import _nixpkgs.path ({
-			overlays = (overlaysOfImport imports) ++ overlays;
-		} // importArgs);
-
-		pkgs = {
-			path ? null,
-			sources ? null,
-
-			overlays ? [],
-			extend ? null,
-			importArgs ? {},
-		}:
-		pkgsOfImport (importFrom { inherit path sources extend; }) {
-			inherit overlays extend importArgs;
-		};
-
-		overlays = args: overlaysOfImport (importFrom args);
 
 		derivations = args: mapAttrs (name: node: node.drv) (importFrom args).sources;
 
@@ -185,11 +165,7 @@ let
 			# importFrom args
 			path ? null, # required if `nix` not given
 			sources ? null,
-
-			# pkgsOfImport args
-			overlays ? [],
 			extend ? null,
-			importArgs ? {},
 		}:
 			let
 				isPath = p: builtins.typeOf p == "path";
@@ -200,17 +176,14 @@ let
 					# so we don't auto-import it. Requires `--option build-use-chroot false`
 					if path == null then path else (if isStorePath path then path else builtins.toString path);
 				nixPath = (if nix != null then nix else "${pathStr}/nix");
-
 				imports = importFrom { inherit path sources extend; };
+				mergedPkgs = internal.mergeImportsInto pkgs imports;
 
-				# If explicitly injected with e.g. `nixpkgs` and nix-wrangle, use those
-				# instead of reconstructing from source
-				injectedDepOverlay = (self: super: filterAttrs (n: v: v != null) provided);
-
-				pkgs = pkgsOfImport imports {inherit importArgs;
-					overlays = [injectedDepOverlay] ++ overlays;
-				};
-				base = pkgs.callPackage nixPath args;
+				# If arguments are explicitly provided, use them in preference to
+				# local sources. This is used in recursive wrangle, to
+				# override a dependency. Note that `provided` defaults pkgs & nix-wrangle to `null`
+				extantProvided = filterAttrs (n: v: v != null) provided;
+				base = lib.callPackageWith (mergedPkgs // extantProvided) nixPath args;
 				selfSrc = imports.sources.self or null;
 			in
 			(if selfSrc == null then base else

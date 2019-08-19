@@ -41,6 +41,7 @@ let
 			git = fetchgit;
 			git-local = withRelativePath exportLocalGit;
 			path = withRelativePath ({ path }: "${path}");
+			_passthru = arg: arg; # used in tests
 		};
 
 		implAttrPaths = node:
@@ -53,7 +54,7 @@ let
 		in
 		foldl recursiveUpdate {} attrs;
 
-		mergeImportsInto = pkgs: imports:
+		mergeImportsInto = pkgs: attrs:
 			let mergeFn = base: node:
 				# convert each node into a sparse recursive attrset
 				# and merge into base recursively
@@ -62,10 +63,11 @@ let
 					paths = internal.implAttrPaths node;
 				in
 				recursiveUpdateUntil (path: l: r: elem path paths) base addition;
+				mergedPkgs = foldl mergeFn pkgs (attrValues attrs);
 			in
-			foldl mergeFn pkgs (attrValues imports.sources);
+			mergedPkgs // { callPackage = pkgs.newScope mergedPkgs; };
 
-		makeImport = settings: name: attrs:
+		makeImport = { settings, pkgs }: name: attrs:
 			let
 				fetchers = makeFetchers settings;
 				fetcher = attrs.type;
@@ -75,7 +77,10 @@ let
 					else abort "Unknown fetcher: ${fetcher}"
 				;
 				nixAttr = attrs.nix or null;
-				nix = if nixAttr == null then null else "${src}/${nixAttr}";
+				nix = if nixAttr == null then null else (
+					if src == null then nixAttr # used in tests only
+					else "${src}/${nixAttr}"
+				);
 				version = attrs.version or (fetchArgs.ref or null);
 
 				defaultCall = { pkgs, path }: pkgs.callPackage path {};
@@ -89,14 +94,20 @@ let
 							inherit src version;
 							drv = callImpl args;
 						});
-				drv = callWith { pkgs = _nixpkgs; path = nix; };
-				node = { inherit name attrs src version nix drv; };
+				drv = callWith { inherit pkgs; path = nix; };
 			in
-			node
-		;
+			{ inherit name attrs src version nix drv; };
 
-		importsOfJson = settings: json: mapAttrs
-			(makeImport { path = json.path or null; }) json;
+		importsOfJson = settings: json:
+			# build a package scope with all imported packages present,
+			# allowing packages in the set to depend on each other
+			let
+				imports = (mapAttrs (makeImport {
+					inherit settings;
+					pkgs = mergeImportsInto _nixpkgs imports;
+				}) json);
+			in
+			imports;
 	};
 
 	api = with internal; with utils; utils // (rec {
@@ -176,20 +187,19 @@ let
 					if path == null then path else (if isStorePath path then path else builtins.toString path);
 				nixPath = (if nix != null then nix else "${pathStr}/nix");
 				imports = importFrom { inherit path sources extend; };
-				mergedPkgs = internal.mergeImportsInto pkgs imports;
 
 				# If arguments are explicitly provided, use them in preference to
 				# local sources. This is used in recursive wrangle, to
 				# override a dependency. Note that `provided` defaults pkgs & nix-wrangle to `null`
 				extantProvided = filterAttrs (n: v: v != null) provided;
-				base = lib.callPackageWith (mergedPkgs // extantProvided) nixPath args;
+				mergedPkgs = internal.mergeImportsInto pkgs (imports.sources // extantProvided);
+				base = mergedPkgs.callPackage nixPath args;
 				selfSrc = imports.sources.self or null;
 			in
 			(if selfSrc == null then base else
 				builtins.trace "[wrangle] injecting src from `self` dependency" (
-				let selfImpl = makeImport { inherit path; } selfSrc.name selfSrc.attrs; in
 				overrideSrc {
-					inherit (selfImpl) src version;
+					inherit (selfSrc) src version;
 					drv = base;
 				})
 			);

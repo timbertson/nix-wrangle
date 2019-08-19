@@ -6,10 +6,11 @@ let
 	wrangleHeader = { apiversion = 1; };
 	addHeader = j: j // { wrangle = wrangleHeader; };
 	eq = msg: a: b:
-		# lib.warn "Executing test case: ${msg}"
-		[
+		let result = [
 			"${msg}: ${toJSON a} != ${toJSON b}" (a == b)
-		];
+		]; in
+		if builtins.getEnv "TRACE" == "1" then
+			lib.warn "Executing test case: ${msg}" result else result;
 
 	versionSrc = import samplePackage/versionSrc.nix;
 
@@ -39,7 +40,10 @@ let
 		};
 	};
 
-	makeImport = internal.makeImport { path = null; };
+	makeImport = internal.makeImport {
+		settings = { path = null; };
+		inherit pkgs;
+	};
 
 	checks = [
 		(eq "implAttrset with no explicit path"
@@ -65,10 +69,52 @@ let
 
 		["mergeImportsInto produces valid derivations"
 			(isDerivation (internal.mergeImportsInto pkgs {
-				sources.version = (makeImport "pythonPackages.versionOverride" versionSrc);
+				version = (makeImport "pythonPackages.versionOverride" versionSrc);
 			}).pythonPackages.versionOverride)]
 
 		["makes derivations" (isDerivation (api.derivations { sources = [ version ]; }).version)]
+
+		(eq "provides inputs to be used by other packages" (
+			(api.importFrom { sources = [
+				(addHeader { sources = {
+					dep = {
+						type="_passthru";
+						fetch = null;
+						nix = ./samplePackage/dep.nix;
+					};
+					dep-user = {
+						type="_passthru";
+						fetch = null;
+						nix = ./samplePackage/dep-user.nix;
+					};
+				}; })
+			]; }).sources.dep-user.drv.depProvided)
+			true)
+
+		(eq "doesn't override imports globally"
+			# import a bunch of named sources that `git` depends on,
+			# then assert that the resulting git is equal to the
+			# upstream one, because its dependencies haven't changed
+			(api.importFrom { sources =
+				let impl = {
+						type="_passthru";
+						fetch = null;
+						nix = ./samplePackage/unbuildable.nix;
+					}; in
+				[(addHeader { sources = {
+					curl = impl;
+					openssl = impl;
+					zlib = impl;
+					openssh = impl;
+					stdenv = impl;
+					upstreamGit = {
+						type="_passthru";
+						fetch = null;
+						nix = ./samplePackage/exposeGit.nix;
+					};
+				}; })];
+			}).sources.upstreamGit.drv.git
+			pkgs.git)
 
 		(eq "imports from git when path is not a store path" (
 			let result = ((internal.makeFetchers { path = ./storeSrc; })
@@ -112,7 +158,7 @@ let
 					};
 				};
 				result = internal.mergeImportsInto base {
-					sources.version = (makeImport "a.b.c.version" versionSrc);
+					version = (makeImport "a.b.c.version" versionSrc);
 				};
 			in (attrNames result.a.b.c) ++ [(result.a.b.c.version ? e) result.a.b.c.version.src.drvPath])
 			["d" "version" false ((makeImport "name" versionSrc).src.drvPath)]

@@ -1,0 +1,8 @@
+#!bash -eu
+. .doc_setup.sh
+
+# fake an old rev
+sed -i -e 's/d805330386553c5784ac7ef48ff38aea716575dc/d805330386553c5784ac7ef48ff38aea716575de/' nix/wrangle.json
+set -x
+comment_REM 'Time to update the `piep` dependency (this re-resolves `master`, or whatever ref is configured)'
+nix-wrangle update piep

@@ -1,0 +1,19 @@
+#!bash -eu
+. .doc_setup.sh
+
+rm -f nix/wrangle*.json
+
+set -x
+comment_REM 'Here'\''s our derivation, nix/default.nix:'
+cat nix/default.nix
+comment_REM 'Initialize nix/wrangle.json (pass `--pkgs nixos-unstable` to pin nixpkgs version):'
+nix-wrangle init
+comment_REM 'Add `self`, which will replace `src` in the toplevel derivation.'
+comment_REM 'The path is `..` because we'\''re in a subdirectory - normally this would just be `.`'
+nix-wrangle add self --type git-local ..
+comment_REM 'Now add a dependency from a github repo:'
+nix-wrangle add piep timbertson/piep --nix nix/
+comment_REM 'When building, we need to disable build-use-chroot due to the `git-local` source'
+nix-build --option build-use-chroot false
+comment_REM 'And here'\''s the result, with injected source and `piep` dependency:'
+cat result

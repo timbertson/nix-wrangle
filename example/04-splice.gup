@@ -1,0 +1,7 @@
+#!bash -eu
+. .doc_setup.sh
+
+set -x
+comment_REM 'Splice the `nix-wrangle` source into nix/default.nix'
+nix-wrangle splice nix/default.nix --name nix-wrangle --output nix/public.nix
+cat nix/public.nix

@@ -1,0 +1,59 @@
+
+# Here's our derivation, nix/default.nix:
+$ cat nix/default.nix
+{ stdenv, piep }:
+stdenv.mkDerivation {
+  name="sample.txt";
+  src = null;
+  buildCommand = ''
+    cat > "$out" <<EOF
+      Sample derivation, built from:
+       - self: $src
+       - piep: ${piep}
+    EOF
+  '';
+}
+
+# Initialize nix/wrangle.json (pass `--pkgs nixos-unstable` to pin nixpkgs version):
+$ nix-wrangle init
+Adding "nix-wrangle" // PackageSpec {sourceSpec = Github (GithubSpec {ghOwner = "timbertson", ghRepo = "nix-wrangle", ghRef = Template "v1"}), fetchAttrs = fromList [], packageAttrs = fromList [("nix","default.nix")]}
+fetching Github (GithubSpec {ghOwner = "timbertson", ghRepo = "nix-wrangle", ghRef = Template "v1"})
+Resolved nix-wrangle -> v1 -> 9664079e09a29139edc29cb2851328f0e22120ac
+ - sha256:1kbj7pfhsjdvzdmjjhj7a82licjpvba6a7phj7bb40gvndgl7als
+Writing: nix/wrangle.json
+Writing: default.nix
+
+# Add `self`, which will replace `src` in the toplevel derivation.
+
+# The path is `..` because we're in a subdirectory - normally this would just be `.`
+$ nix-wrangle add self --type git-local ..
+Reading sources: nix/wrangle.json
+Adding "self" // PackageSpec {sourceSpec = GitLocal (GitLocalSpec {glPath = RelativePath "..", glRef = Template "HEAD"}), fetchAttrs = fromList [], packageAttrs = fromList [("nix","default.nix")]}
+fetching GitLocal (GitLocalSpec {glPath = RelativePath "..", glRef = Template "HEAD"})
+Writing: nix/wrangle.json
+
+# Now add a dependency from a github repo:
+$ nix-wrangle add piep timbertson/piep --nix nix/
+Reading sources: nix/wrangle.json
+Adding "piep" // PackageSpec {sourceSpec = Github (GithubSpec {ghOwner = "timbertson", ghRepo = "piep", ghRef = Template "master"}), fetchAttrs = fromList [], packageAttrs = fromList [("nix","nix/")]}
+fetching Github (GithubSpec {ghOwner = "timbertson", ghRepo = "piep", ghRef = Template "master"})
+Resolved piep -> master -> d805330386553c5784ac7ef48ff38aea716575dc
+ - sha256:1q7lzi3lggw8by4pkh5ckkjv68xqbjahrkxgdw89jxdlyd0wq5in
+Writing: nix/wrangle.json
+
+# When building, we need to disable build-use-chroot due to the `git-local` source
+$ nix-build --option build-use-chroot false
+trace: [wrangle] Loading /nix/store/hxf7m95k4y4ycjwg0qxk6ny202z2q2zw-source/nix/wrangle.json
+trace: [wrangle] injecting src from `self` dependency
+trace: [wrangle] Loading /home/tim/dev/nix/nix-wrangle/example/nix/wrangle.json
+trace: [wrangle] injecting src from `self` dependency
+trace: [wrangle] Importing piep from /nix/store/ax68rn4b8dc4lrcfqq4rhx2fcwdr807a-source/nix/
+trace: Dereferenced git ref /home/tim/dev/nix/nix-wrangle/example/../.git/HEAD to ref: refs/heads/v1
+trace: Dereferenced git ref /home/tim/dev/nix/nix-wrangle/example/../.git/refs/heads/v1 to 9664079e09a29139edc29cb2851328f0e22120ac
+/nix/store/kp4gvwg4mfqbyh6a1mbzjdn9fzgsa42h-sample.txt
+
+# And here's the result, with injected source and `piep` dependency:
+$ cat result
+  Sample derivation, built from:
+   - self: /nix/store/c6l2yrl4y2nkmnq7j2mp5xl4dpsvs72g-git-export
+   - piep: /nix/store/7fysz0cm3686f7hkhdk76kws4p8rswa2-python2.7-piep-0.8.1

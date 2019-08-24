@@ -47,11 +47,11 @@ let
 
 	checks = [
 		(eq "implAttrset with no explicit path"
-			(internal.implAttrset { attrs = {}; name = "foo"; } 1)
+			(internal.implAttrset { attrs = {}; name = "foo"; drv = 1; })
 			{ foo = 1; })
 
 		(eq "implAttrset with multiple paths"
-			(internal.implAttrset { attrs = { attrPaths = ["foo" "bar.baz"]; }; } 1)
+			(internal.implAttrset { attrs = { attrPaths = ["foo" "bar.baz"]; }; drv = 1; })
 			{ foo = 1; bar = { baz = 1; }; })
 
 		["implPath is path" (isString (makeImport "name" versionSrc).nix)]

@@ -47,23 +47,20 @@ let
 		implAttrPaths = node:
 			map (splitString ".") (node.attrs.attrPaths or [node.name]);
 
-		implAttrset = node: impl:
+		implAttrset = node:
 		let
 			paths = implAttrPaths node;
-			attrs = map (path: setAttrByPath path impl) paths;
+			attrs = map (path: setAttrByPath path node.drv) paths;
 		in
 		foldl recursiveUpdate {} attrs;
 
 		mergeImportsInto = pkgs: attrs:
-			let mergeFn = base: node:
-				# convert each node into a sparse recursive attrset
-				# and merge into base recursively
-				let
-					addition = internal.implAttrset node node.drv;
-					paths = internal.implAttrPaths node;
-				in
-				recursiveUpdateUntil (path: l: r: elem path paths) base addition;
-				mergedPkgs = foldl mergeFn pkgs (attrValues attrs);
+			let
+				mergedPkgs = foldl' mergeFn pkgs (attrValues attrs);
+				mergeFn = base: node:
+					# convert each node into a sparse recursive attrset
+					# and merge into base recursively
+					recursiveUpdateUntil (path: l: r: r == node.drv) base (implAttrset node);
 			in
 			mergedPkgs // { callPackage = pkgs.newScope mergedPkgs; };
 
@@ -192,7 +189,7 @@ let
 				# local sources. This is used in recursive wrangle, to
 				# override a dependency. Note that `provided` defaults pkgs & nix-wrangle to `null`
 				extantProvided = filterAttrs (n: v: v != null) provided;
-				mergedPkgs = internal.mergeImportsInto pkgs (imports.sources // extantProvided);
+				mergedPkgs = (internal.mergeImportsInto pkgs imports.sources) // extantProvided;
 				base = mergedPkgs.callPackage nixPath args;
 				selfSrc = imports.sources.self or null;
 			in

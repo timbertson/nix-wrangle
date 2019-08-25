@@ -7,7 +7,6 @@ import Prelude hiding (error)
 import Control.Exception (toException)
 import Control.Monad.Except (throwError)
 import Control.Applicative (liftA2)
-import Control.DeepSeq (($!!))
 import Data.Aeson (toJSON)
 import Data.List (intercalate)
 import Data.List.NonEmpty (NonEmpty(..))
@@ -18,7 +17,7 @@ import System.Environment (lookupEnv, getExecutablePath)
 import System.FilePath.Posix ((</>), takeDirectory)
 import Wrangle.Util
 import Wrangle.Source
-import qualified GHC.IO.Handle as H
+import qualified System.IO.Strict as H
 import qualified Data.HashMap.Strict as HMap
 import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.Text as T
@@ -112,7 +111,7 @@ runProcessOutput src p = P.withCreateProcess p read where
     h <- liftMaybe (toException $ AppError $ srcDesc<>" handle is null") handle
     contents <- H.hGetContents h
     _ <- P.waitForProcess proc
-    return $!! contents
+    return contents
     where
       (srcDesc, handle) = case src of
         Stdout -> ("stdout", stdout)

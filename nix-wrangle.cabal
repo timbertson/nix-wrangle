@@ -46,7 +46,7 @@ executable nix-wrangle
     -- Fetch
     , regex-tdfa
     , process
-    , deepseq
+    , strict
 
 
   default-language: Haskell2010

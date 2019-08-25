@@ -187,7 +187,7 @@ let
 
 				# pull args out of provided
 				_args = if (args == {} && provided ? args) then provided.args else args;
-				_provided = filterAttrs (n: v: ! elem n ["args"]) provided
+				_provided = filterAttrs (n: v: ! elem n ["args"]) provided;
 
 				# If arguments are explicitly provided, use them in preference to
 				# local sources. This is used in recursive wrangle, to

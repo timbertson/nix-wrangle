@@ -185,12 +185,16 @@ let
 				nixPath = (if nix != null then nix else "${pathStr}/nix");
 				imports = importFrom { inherit path sources extend; };
 
+				# pull args out of provided
+				_args = if (args == {} && provided ? args) then provided.args else args;
+				_provided = filterAttrs (n: v: ! elem n ["args"]) provided
+
 				# If arguments are explicitly provided, use them in preference to
 				# local sources. This is used in recursive wrangle, to
 				# override a dependency. Note that `provided` defaults pkgs & nix-wrangle to `null`
-				extantProvided = filterAttrs (n: v: v != null) provided;
+				extantProvided = filterAttrs (n: v: v != null) _provided;
 				mergedPkgs = (internal.mergeImportsInto pkgs imports.sources) // extantProvided;
-				base = mergedPkgs.callPackage nixPath args;
+				base = mergedPkgs.callPackage nixPath _args;
 				selfSrc = imports.sources.self or null;
 			in
 			(if selfSrc == null then base else

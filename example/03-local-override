@@ -1,5 +1,4 @@
 
-
 # Let's develop against my local checkout of `piep`.
 # Local overrides are stored in nix/wrangle-local.json, which you shouldn't commit
 $ nix-wrangle add --local piep --type git-local --path /home/tim/dev/python/piep --nix nix/
@@ -7,26 +6,8 @@ Adding "piep" // PackageSpec {sourceSpec = GitLocal (GitLocalSpec {glPath = Full
 fetching GitLocal (GitLocalSpec {glPath = FullPath "/home/tim/dev/python/piep", glRef = Template "HEAD"})
 Writing: nix/wrangle-local.json
 
-$ nix-wrangle prebuild
-/nix/store/ax68rn4b8dc4lrcfqq4rhx2fcwdr807a-source
-/nix/store/3a8y6pjx6msnkl4ajjbf9lr7gvhpm6qf-source
-trace: Dereferenced git ref /home/tim/dev/nix/nix-wrangle/example/../.git/HEAD to ref: refs/heads/v1
-trace: Dereferenced git ref /home/tim/dev/nix/nix-wrangle/example/../.git/refs/heads/v1 to 401c12bd3de5dac6a3a9159504d1bb02a9f597aa
-/nix/store/kviy2caywm2iqszsdzh6hs62miswbcvv-git-export
-trace: Dereferenced git ref /home/tim/dev/python/piep/.git/HEAD to ref: refs/heads/master
-trace: Dereferenced git ref /home/tim/dev/python/piep/.git/refs/heads/master to 3b493de55e6c29ee173013c43e79ccddbcf6e1e5
-/nix/store/7gln9xv5cxzj22i1dnh3ysvk3jp2r5ql-git-export
-Reading sources: nix/wrangle.json
-Reading sources: nix/wrangle-local.json
-Prebuilding nix/wrangle.json ...
-Building: piep (github)
-Building: nix-wrangle (github)
-Building: self (git-local)
-Prebuilding nix/wrangle-local.json ...
-Building: piep (git-local)
-
-$ nix-build
-trace: [wrangle] Loading /home/tim/dev/nix/nix-wrangle/nix/wrangle.json
+$ nix-build --option build-use-chroot false
+trace: [wrangle] Loading /nix/store/hxf7m95k4y4ycjwg0qxk6ny202z2q2zw-source/nix/wrangle.json
 trace: [wrangle] injecting src from `self` dependency
 trace: [wrangle] Loading /home/tim/dev/nix/nix-wrangle/example/nix/wrangle.json
 trace: [wrangle] Loading /home/tim/dev/nix/nix-wrangle/example/nix/wrangle-local.json
@@ -35,10 +16,16 @@ trace: Dereferenced git ref /home/tim/dev/python/piep/.git/HEAD to ref: refs/hea
 trace: Dereferenced git ref /home/tim/dev/python/piep/.git/refs/heads/master to 3b493de55e6c29ee173013c43e79ccddbcf6e1e5
 trace: [wrangle] Importing piep from /nix/store/7gln9xv5cxzj22i1dnh3ysvk3jp2r5ql-git-export/nix/
 trace: Dereferenced git ref /home/tim/dev/nix/nix-wrangle/example/../.git/HEAD to ref: refs/heads/v1
-trace: Dereferenced git ref /home/tim/dev/nix/nix-wrangle/example/../.git/refs/heads/v1 to 401c12bd3de5dac6a3a9159504d1bb02a9f597aa
-/nix/store/9yga2m47l320g738yjfi2xbjs1rr4plg-sample.txt
+trace: Dereferenced git ref /home/tim/dev/nix/nix-wrangle/example/../.git/refs/heads/v1 to 1583199d2c4ff5533780e48f483488b6bef2f238
+these derivations will be built:
+  /nix/store/af2bsjlqiby72jw60ax5s7bsvkbbpbph-git-export.drv
+  /nix/store/hymb95nxw6qnin4kcr3mpyisvkh8a7g0-sample.txt.drv
+building '/nix/store/af2bsjlqiby72jw60ax5s7bsvkbbpbph-git-export.drv'...
+Exporting git revision 1583199d2c4ff5533780e48f483488b6bef2f238
+building '/nix/store/hymb95nxw6qnin4kcr3mpyisvkh8a7g0-sample.txt.drv'...
+/nix/store/9y313glsfb3filf08wyknxn72jz479ca-sample.txt
 
 $ cat result
   Sample derivation, built from:
-   - self: /nix/store/kviy2caywm2iqszsdzh6hs62miswbcvv-git-export
+   - self: /nix/store/6h3kaq6wqgcmkv9vwqavanpwc5fy4mgj-git-export
    - piep: /nix/store/ylmmn3i3fjk7zqvik9isdpbbxvfv3jxm-python2.7-piep-0.9.2

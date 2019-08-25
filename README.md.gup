@@ -25,7 +25,7 @@ nix-wrangle maintains a set of sources, which are typically dependencies. The fo
 
 $(include example/01-setup)
 
-Note that the dependency is built (by using \`pkgs.callPackage\` on the nix path within the source), which gives you the actual derivation, not simply the source code. This is one important difference compared to [niv](https://github.com/nmattia/niv).
+Note that the \`piep\` dependency is built (by using \`pkgs.callPackage\` on the nix path within the source), which gives you the actual derivation, not simply the source code. This is one important difference compared to [niv](https://github.com/nmattia/niv).
 
 Sources are typically used for project dependencies, but there are three special sources:
 
@@ -45,9 +45,11 @@ $(include example/02-update)
 
 You can also make use of templating, e.g. for a URL dependency you can use the URL \`'http://example.com/libfoo/libfoo-<version>.tgz'\`. When updating, you can pass \`--version NEW_VERSION\` to update it.
 
-## 'self' injection: let nix-wrangle inject your 'src' attribute from any of the available fetcher types
+## 'src' injection
 
-('git-local' is particularly useful)
+When building, a \`self\` dependency (if present) will be used to provide the \`src\` for the toplevel derivation. This lets you use nix-wrangle's various source types (e.g git-local, which isn't available as a \`nixpkgs\` builtin) and automatic generation (e.g. sha256 digests).
+
+nix-wrangle will also inject the relevant \`src\` into each of your dependencies. Let's say you import commit \`x\` of the \`piep\` dependency, with a nix expression in it. It would be impossible for commit \`x\` of \`piep\` to refer to commit \`x\` as its \`src\` attribute. The best it could do is to refer to the parent of commit \`x\`, although it may often just refer to the most recently released version. Both of these would be counter-productive - you'd be importing the \`derivation\` at \`x\`, but building source code from _some other version_ out of your control. \`nix-wrangle\` automatically overrides the \`src\` of imported dependencies so that the version you _import_ is also the source code you _build_.
 
 ## Local overrides
 
@@ -57,11 +59,11 @@ $(include example/03-local-override)
 
 This uses the local version of a dependency for building, but kept separate from the "public" version of your dependency specificaion.
 
-## Splicing into a self-contained derivation
+## Splicing \`src\` to produce a self-contained derivation
 
 nix-wrangle was built so that your base derivation (\`nix/default.nix\`) can be idiomatic - it doesn't need to reference \`nix-wrangle\` at all, and its dependencies are injected as arguments, just like regular derivations in \`nixpkgs\`. The one way in which they aren't idiomatic is the \`src\` attribute. I typically set this to \`null\` to make it clear that it's externally managed.
 
-So there's also the \`splice\` command. This injects the current value of a fetched source (defaulting to \`self\`) into a \`.nix\` expression to create a self-contained derivation. This is perfect for promoting your in-tree derivation (with source provided by nix-wrangle) into a derivation suitable for inclusion in \`nixpkgs\`, where it includes its own \`src\` and all dependencies are provided by the caller.
+So there's also the \`splice\` command. This injects the current value of a fetched source (defaulting to \`self\`) into an existing nix file to create a self-contained derivation. This is perfect for promoting your in-tree derivation (with source provided by nix-wrangle) into a derivation suitable for inclusion in \`nixpkgs\`, where it includes its own \`src\` and all dependencies are provided by the caller.
 
 $(include example/04-splice)
 

@@ -1,12 +1,11 @@
 #!bash -eu
 . .doc_setup.sh
 
-rm nix/wrangle-local.json
+rm -f nix/wrangle-local.json
 # fake an old rev
 sed -i -e 's/d805330386553c5784ac7ef48ff38aea716575dc/d805330386553c5784ac7ef48ff38aea716575de/' nix/wrangle.json
 set -x
 comment_REM 'Let'\''s develop against my local checkout of `piep`.\n# Local overrides are stored in nix/wrangle-local.json, which you shouldn'\''t commit'
 nix-wrangle add --local piep --type git-local --path ~/dev/python/piep --nix nix/
-nix-wrangle prebuild
-nix-build
+nix-build --option build-use-chroot false
 cat result

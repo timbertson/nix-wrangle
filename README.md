@@ -12,7 +12,7 @@ nix-wrangle maintains a set of sources, which are typically dependencies. The fo
 
 ```bash
 
-# Here's our derivation, nix/default.nix:
+# Here's our derivation, nix/default.nix. It expects a \`piep\` argument, and doesn't have its own `src`:
 $ cat nix/default.nix
 { stdenv, piep }:
 stdenv.mkDerivation {
@@ -31,8 +31,8 @@ stdenv.mkDerivation {
 $ nix-wrangle init
 Adding "nix-wrangle" // PackageSpec {sourceSpec = Github (GithubSpec {ghOwner = "timbertson", ghRepo = "nix-wrangle", ghRef = Template "v1"}), fetchAttrs = fromList [], packageAttrs = fromList [("nix","default.nix")]}
 fetching Github (GithubSpec {ghOwner = "timbertson", ghRepo = "nix-wrangle", ghRef = Template "v1"})
-Resolved nix-wrangle -> v1 -> 9664079e09a29139edc29cb2851328f0e22120ac
- - sha256:1kbj7pfhsjdvzdmjjhj7a82licjpvba6a7phj7bb40gvndgl7als
+Resolved nix-wrangle -> v1 -> 1583199d2c4ff5533780e48f483488b6bef2f238
+ - sha256:1xb87hcqpc60pjjfjnk10n1clrnzl9z8xjzrjk9h5dgkmih7x5gb
 Writing: nix/wrangle.json
 Writing: default.nix
 
@@ -45,7 +45,7 @@ Adding "self" // PackageSpec {sourceSpec = GitLocal (GitLocalSpec {glPath = Rela
 fetching GitLocal (GitLocalSpec {glPath = RelativePath "..", glRef = Template "HEAD"})
 Writing: nix/wrangle.json
 
-# Now add a dependency from a github repo:
+# Now provide the `piep` dependency from a github repo:
 $ nix-wrangle add piep timbertson/piep --nix nix/
 Reading sources: nix/wrangle.json
 Adding "piep" // PackageSpec {sourceSpec = Github (GithubSpec {ghOwner = "timbertson", ghRepo = "piep", ghRef = Template "master"}), fetchAttrs = fromList [], packageAttrs = fromList [("nix","nix/")]}
@@ -56,23 +56,26 @@ Writing: nix/wrangle.json
 
 # When building, we need to disable build-use-chroot due to the `git-local` source
 $ nix-build --option build-use-chroot false
-trace: [wrangle] Loading /nix/store/hxf7m95k4y4ycjwg0qxk6ny202z2q2zw-source/nix/wrangle.json
+trace: [wrangle] Loading /nix/store/fgz707z3n7mrrajlzfwx98d0ad4ajry0-source/nix/wrangle.json
 trace: [wrangle] injecting src from `self` dependency
 trace: [wrangle] Loading /home/tim/dev/nix/nix-wrangle/example/nix/wrangle.json
 trace: [wrangle] injecting src from `self` dependency
 trace: [wrangle] Importing piep from /nix/store/ax68rn4b8dc4lrcfqq4rhx2fcwdr807a-source/nix/
 trace: Dereferenced git ref /home/tim/dev/nix/nix-wrangle/example/../.git/HEAD to ref: refs/heads/v1
-trace: Dereferenced git ref /home/tim/dev/nix/nix-wrangle/example/../.git/refs/heads/v1 to 9664079e09a29139edc29cb2851328f0e22120ac
-/nix/store/kp4gvwg4mfqbyh6a1mbzjdn9fzgsa42h-sample.txt
+trace: Dereferenced git ref /home/tim/dev/nix/nix-wrangle/example/../.git/refs/heads/v1 to 1583199d2c4ff5533780e48f483488b6bef2f238
+these derivations will be built:
+  /nix/store/sx0gd8wrwdb56xx4mi6d3hwgfsd9gjql-sample.txt.drv
+building '/nix/store/sx0gd8wrwdb56xx4mi6d3hwgfsd9gjql-sample.txt.drv'...
+/nix/store/bj1xpqnw8qfnrzyj3cppid5w6ydlbhcc-sample.txt
 
 # And here's the result, with injected source and `piep` dependency:
 $ cat result
   Sample derivation, built from:
-   - self: /nix/store/c6l2yrl4y2nkmnq7j2mp5xl4dpsvs72g-git-export
+   - self: /nix/store/6h3kaq6wqgcmkv9vwqavanpwc5fy4mgj-git-export
    - piep: /nix/store/7fysz0cm3686f7hkhdk76kws4p8rswa2-python2.7-piep-0.8.1
 ```
 
-Note that the dependency is built (by using `pkgs.callPackage` on the nix path within the source), which gives you the actual derivation, not simply the source code. This is one important difference compared to [niv](https://github.com/nmattia/niv).
+Note that the `piep` dependency is built (by using `pkgs.callPackage` on the nix path within the source), which gives you the actual derivation, not simply the source code. This is one important difference compared to [niv](https://github.com/nmattia/niv).
 
 Sources are typically used for project dependencies, but there are three special sources:
 
@@ -103,16 +106,17 @@ Writing: nix/wrangle.json
 
 You can also make use of templating, e.g. for a URL dependency you can use the URL `'http://example.com/libfoo/libfoo-<version>.tgz'`. When updating, you can pass `--version NEW_VERSION` to update it.
 
-## 'self' injection: let nix-wrangle inject your 'src' attribute from any of the available fetcher types
+## 'src' injection
 
-('git-local' is particularly useful)
+When building, a `self` dependency (if present) will be used to provide the `src` for the toplevel derivation. This lets you use nix-wrangle's various source types (e.g git-local, which isn't available as a `nixpkgs` builtin) and automatic generation (e.g. sha256 digests).
+
+nix-wrangle will also inject the relevant `src` into each of your dependencies. Let's say you import commit `x` of the `piep` dependency, with a nix expression in it. It would be impossible for commit `x` of `piep` to refer to commit `x` as its `src` attribute. The best it could do is to refer to the parent of commit `x`, although it may often just refer to the most recently released version. Both of these would be counter-productive - you'd be importing the `derivation` at `x`, but building source code from _some other version_ out of your control. `nix-wrangle` automatically overrides the `src` of imported dependencies so that the version you _import_ is also the source code you _build_.
 
 ## Local overrides
 
 When working on both a library and an application that uses it, it's common to want to try out working changes before publishing them. This is easy with local sources:
 
 ```bash
-
 
 # Let's develop against my local checkout of `piep`.
 # Local overrides are stored in nix/wrangle-local.json, which you shouldn't commit
@@ -121,26 +125,8 @@ Adding "piep" // PackageSpec {sourceSpec = GitLocal (GitLocalSpec {glPath = Full
 fetching GitLocal (GitLocalSpec {glPath = FullPath "/home/tim/dev/python/piep", glRef = Template "HEAD"})
 Writing: nix/wrangle-local.json
 
-$ nix-wrangle prebuild
-/nix/store/ax68rn4b8dc4lrcfqq4rhx2fcwdr807a-source
-/nix/store/3a8y6pjx6msnkl4ajjbf9lr7gvhpm6qf-source
-trace: Dereferenced git ref /home/tim/dev/nix/nix-wrangle/example/../.git/HEAD to ref: refs/heads/v1
-trace: Dereferenced git ref /home/tim/dev/nix/nix-wrangle/example/../.git/refs/heads/v1 to 401c12bd3de5dac6a3a9159504d1bb02a9f597aa
-/nix/store/kviy2caywm2iqszsdzh6hs62miswbcvv-git-export
-trace: Dereferenced git ref /home/tim/dev/python/piep/.git/HEAD to ref: refs/heads/master
-trace: Dereferenced git ref /home/tim/dev/python/piep/.git/refs/heads/master to 3b493de55e6c29ee173013c43e79ccddbcf6e1e5
-/nix/store/7gln9xv5cxzj22i1dnh3ysvk3jp2r5ql-git-export
-Reading sources: nix/wrangle.json
-Reading sources: nix/wrangle-local.json
-Prebuilding nix/wrangle.json ...
-Building: piep (github)
-Building: nix-wrangle (github)
-Building: self (git-local)
-Prebuilding nix/wrangle-local.json ...
-Building: piep (git-local)
-
-$ nix-build
-trace: [wrangle] Loading /home/tim/dev/nix/nix-wrangle/nix/wrangle.json
+$ nix-build --option build-use-chroot false
+trace: [wrangle] Loading /nix/store/hxf7m95k4y4ycjwg0qxk6ny202z2q2zw-source/nix/wrangle.json
 trace: [wrangle] injecting src from `self` dependency
 trace: [wrangle] Loading /home/tim/dev/nix/nix-wrangle/example/nix/wrangle.json
 trace: [wrangle] Loading /home/tim/dev/nix/nix-wrangle/example/nix/wrangle-local.json
@@ -149,22 +135,28 @@ trace: Dereferenced git ref /home/tim/dev/python/piep/.git/HEAD to ref: refs/hea
 trace: Dereferenced git ref /home/tim/dev/python/piep/.git/refs/heads/master to 3b493de55e6c29ee173013c43e79ccddbcf6e1e5
 trace: [wrangle] Importing piep from /nix/store/7gln9xv5cxzj22i1dnh3ysvk3jp2r5ql-git-export/nix/
 trace: Dereferenced git ref /home/tim/dev/nix/nix-wrangle/example/../.git/HEAD to ref: refs/heads/v1
-trace: Dereferenced git ref /home/tim/dev/nix/nix-wrangle/example/../.git/refs/heads/v1 to 401c12bd3de5dac6a3a9159504d1bb02a9f597aa
-/nix/store/9yga2m47l320g738yjfi2xbjs1rr4plg-sample.txt
+trace: Dereferenced git ref /home/tim/dev/nix/nix-wrangle/example/../.git/refs/heads/v1 to 1583199d2c4ff5533780e48f483488b6bef2f238
+these derivations will be built:
+  /nix/store/af2bsjlqiby72jw60ax5s7bsvkbbpbph-git-export.drv
+  /nix/store/hymb95nxw6qnin4kcr3mpyisvkh8a7g0-sample.txt.drv
+building '/nix/store/af2bsjlqiby72jw60ax5s7bsvkbbpbph-git-export.drv'...
+Exporting git revision 1583199d2c4ff5533780e48f483488b6bef2f238
+building '/nix/store/hymb95nxw6qnin4kcr3mpyisvkh8a7g0-sample.txt.drv'...
+/nix/store/9y313glsfb3filf08wyknxn72jz479ca-sample.txt
 
 $ cat result
   Sample derivation, built from:
-   - self: /nix/store/kviy2caywm2iqszsdzh6hs62miswbcvv-git-export
+   - self: /nix/store/6h3kaq6wqgcmkv9vwqavanpwc5fy4mgj-git-export
    - piep: /nix/store/ylmmn3i3fjk7zqvik9isdpbbxvfv3jxm-python2.7-piep-0.9.2
 ```
 
 This uses the local version of a dependency for building, but kept separate from the "public" version of your dependency specificaion.
 
-## Splicing into a self-contained derivation
+## Splicing `src` to produce a self-contained derivation
 
 nix-wrangle was built so that your base derivation (`nix/default.nix`) can be idiomatic - it doesn't need to reference `nix-wrangle` at all, and its dependencies are injected as arguments, just like regular derivations in `nixpkgs`. The one way in which they aren't idiomatic is the `src` attribute. I typically set this to `null` to make it clear that it's externally managed.
 
-So there's also the `splice` command. This injects the current value of a fetched source (defaulting to `self`) into a `.nix` expression to create a self-contained derivation. This is perfect for promoting your in-tree derivation (with source provided by nix-wrangle) into a derivation suitable for inclusion in `nixpkgs`, where it includes its own `src` and all dependencies are provided by the caller.
+So there's also the `splice` command. This injects the current value of a fetched source (defaulting to `self`) into an existing nix file to create a self-contained derivation. This is perfect for promoting your in-tree derivation (with source provided by nix-wrangle) into a derivation suitable for inclusion in `nixpkgs`, where it includes its own `src` and all dependencies are provided by the caller.
 
 ```bash
 

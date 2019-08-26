@@ -142,7 +142,7 @@ parseAdd =
     parseSource = Opts.argument Opts.str (Opts.metavar "SOURCE")
 
     build :: Maybe PackageName -> Maybe String -> StringMap -> Either String (PackageName, Source.PackageSpec)
-    build nameOpt sourceOpt = evalStateT (modify' canonicalizeNix >> build' nameOpt sourceOpt)
+    build nameOpt sourceOpt = evalStateT (modify' (canonicalizeNix nameOpt) >> build' nameOpt sourceOpt)
 
     build' :: Maybe PackageName -> Maybe String -> StringMapState (PackageName, Source.PackageSpec)
     build' nameOpt sourceOpt = typ >>= \case
@@ -165,9 +165,11 @@ parseAdd =
     }), HMap.empty)
 
     -- default `nix` attribute, or drop it if it's explicitly `"false"`
-    canonicalizeNix attrs = case (HMap.lookup key attrs `orElse` "default.nix") of
-      "false" -> HMap.delete key attrs
-      other -> HMap.insert key other attrs
+    canonicalizeNix nameOpt attrs = case (nameOpt, HMap.lookup key attrs) of
+      (Just (Source.PackageName "self"), Nothing) -> attrs -- don't add any default for `self`
+      (_, Just "false") -> HMap.delete key attrs
+      (_, Just nix) -> HMap.insert key nix attrs
+      (_, Nothing) -> HMap.insert key "default.nix" attrs
       where key = "nix"
 
     buildPathOpt :: StringMapState (Maybe Source.LocalPath)
@@ -403,7 +405,8 @@ parseCmdInit = subcommand "Initialize nix-wrangle" (
 
 cmdInit :: Maybe String -> IO ()
 cmdInit nixpkgs = do
-  addMultiple OverwriteSource (Right (wrangleSpec : nixpkgsSpecs)) commonOpts
+  isGit <- Dir.doesFileExist ".git"
+  addMultiple OverwriteSource (Right (selfSpec isGit : wrangleSpec : nixpkgsSpecs)) commonOpts
   updateDefaultNix defaultNixOptsDefault
   where
     commonOpts = CommonOpts { sources = Nothing }
@@ -428,11 +431,23 @@ cmdInit nixpkgs = do
       Source.packageAttrs = HMap.fromList [("nix", "default.nix")]
     })]
 
+    selfSpec isGit =
+      (PackageName "self", Source.PackageSpec {
+        Source.sourceSpec = if isGit then (Source.GitLocal Source.GitLocalSpec {
+          Source.glPath = localPath,
+          Source.glRef = Source.Template "HEAD"
+        }) else (Source.Path localPath),
+        Source.fetchAttrs = HMap.empty,
+        Source.packageAttrs = HMap.empty
+      })
+      where
+        localPath = Source.RelativePath "."
+
 -------------------------------------------------------------------------------
 -- Add
 -------------------------------------------------------------------------------
 
-data AddMode = AddSource | OverwriteSource
+data AddMode = AddSource | OverwriteSource | AddIfMissing
 
 parseCmdAdd :: Opts.ParserInfo (IO ())
 parseCmdAdd = subcommand "Add a source" (cmdAdd <$> parseAddMode <*> parseAdd <*> parseCommon)
@@ -464,10 +479,13 @@ addMultiple addMode addOpts opts =
   where
     addSingle :: Source.Packages -> (PackageName, Source.PackageSpec) -> IO Source.Packages
     addSingle base (name, inputSpec) = do
-      putStrLn $ "Adding " <> show name <> " // " <> show inputSpec
-      checkAddMode addMode name base
-      spec <- Fetch.prefetch name inputSpec
-      return $ Source.add base name spec
+      shouldAdd' <- shouldAdd addMode name base
+      if shouldAdd' then do
+        putStrLn $ "Adding " <> show name <> " // " <> show inputSpec
+        spec <- Fetch.prefetch name inputSpec
+        return $ Source.add base name spec
+      else
+        return base
 
     tryLoadSource :: Source.SourceFile -> IO (Source.SourceFile, Maybe Source.Packages)
     -- TODO: arrows?
@@ -478,13 +496,14 @@ addMultiple addMode addOpts opts =
         else Nothing
       return (f, loaded)
 
-    checkAddMode :: AddMode -> PackageName -> Source.Packages -> IO ()
-    checkAddMode mode name@(PackageName nameStr) existing =
+    shouldAdd :: AddMode -> PackageName -> Source.Packages -> IO Bool
+    shouldAdd mode name@(PackageName nameStr) existing =
       if Source.member existing name then
         case mode of
           AddSource -> throwM $ AppError $ nameStr <> " already present, use --replace to replace it"
-          OverwriteSource -> infoLn $ "Replacing existing " <> nameStr
-      else return ()
+          OverwriteSource -> infoLn ("Replacing existing " <> nameStr) >> return True
+          AddIfMissing -> infoLn ("Not replacing existing " <> nameStr) >> return False
+      else return True
 
 cmdAdd :: AddMode -> Either AppError (PackageName, Source.PackageSpec) -> CommonOpts -> IO ()
 cmdAdd addMode addOpt opts = addMultiple addMode ((\x -> [x]) <$> addOpt) opts

@@ -132,44 +132,39 @@ consumeAttrT key = StateT consume where
 
 defaultGitRef = "master"
 
-parseAdd :: Opts.Parser (Either AppError (PackageName, Source.PackageSpec))
-parseAdd =
-  mapLeft AppError <$> (build
-    <$> Opts.optional parseName
-    <*> Opts.optional parseSource
-    <*> parsePackageAttrs)
+processAdd :: Maybe PackageName -> Maybe String -> StringMap -> Either AppError (Maybe PackageName, Source.PackageSpec)
+processAdd nameOpt source attrs = mapLeft AppError $ build nameOpt source attrs
   where
-    parseSource = Opts.argument Opts.str (Opts.metavar "SOURCE")
+    build :: Maybe PackageName -> Maybe String -> StringMap -> Either String (Maybe PackageName, Source.PackageSpec)
+    build nameOpt source = evalStateT (modify' (canonicalizeNix nameOpt) >> build' nameOpt source)
 
-    build :: Maybe PackageName -> Maybe String -> StringMap -> Either String (PackageName, Source.PackageSpec)
-    build nameOpt sourceOpt = evalStateT (modify' (canonicalizeNix nameOpt) >> build' nameOpt sourceOpt)
-
-    build' :: Maybe PackageName -> Maybe String -> StringMapState (PackageName, Source.PackageSpec)
+    build' :: Maybe PackageName -> Maybe String -> StringMapState (Maybe PackageName, Source.PackageSpec)
     build' nameOpt sourceOpt = typ >>= \case
       Source.FetchGithub -> buildGithub sourceOpt nameOpt
-      (Source.FetchUrl urlType) -> name >>= buildUrl urlType sourceOpt
-      Source.FetchPath -> name >>= buildLocalPath sourceOpt
-      Source.FetchGitLocal -> name >>= buildGitLocal sourceOpt
-      Source.FetchGit -> name >>= buildGit sourceOpt
+      (Source.FetchUrl urlType) -> withName nameOpt $ buildUrl urlType sourceOpt
+      Source.FetchPath -> withName nameOpt $ buildLocalPath sourceOpt
+      Source.FetchGitLocal -> withName nameOpt $ buildGitLocal sourceOpt
+      Source.FetchGit -> withName nameOpt $ buildGit sourceOpt
       where
         typ :: StringMapState Source.FetchType
         typ = (consumeAttrT "type" <|> pure "github") >>= lift . Source.parseFetchType
-        name :: StringMapState PackageName
-        name = lift $ toRight (attrRequired "name") nameOpt
 
-    packageSpec :: PackageName -> Source.SourceSpec -> StringMapState (PackageName, Source.PackageSpec)
-    packageSpec name sourceSpec = state $ \attrs -> ((name, Source.PackageSpec {
+    withName :: Maybe PackageName -> StringMapState a -> StringMapState (Maybe PackageName, a)
+    withName name = fmap (\snd -> (name, snd))
+
+    packageSpec :: Source.SourceSpec -> StringMapState Source.PackageSpec
+    packageSpec sourceSpec = state $ \attrs -> (Source.PackageSpec {
       Source.sourceSpec,
       Source.packageAttrs = attrs,
       Source.fetchAttrs = Source.emptyAttrs
-    }), HMap.empty)
+    }, HMap.empty)
 
     -- default `nix` attribute, or drop it if it's explicitly `"false"`
     canonicalizeNix nameOpt attrs = case (nameOpt, HMap.lookup key attrs) of
       (Just (Source.PackageName "self"), Nothing) -> attrs -- don't add any default for `self`
       (_, Just "false") -> HMap.delete key attrs
       (_, Just nix) -> HMap.insert key nix attrs
-      (_, Nothing) -> HMap.insert key "default.nix" attrs
+      (_, Nothing) -> HMap.insert key defaultDepNixPath attrs
       where key = "nix"
 
     buildPathOpt :: StringMapState (Maybe Source.LocalPath)
@@ -185,46 +180,46 @@ parseAdd =
       then Source.FullPath path
       else Source.RelativePath path
 
-    buildLocalPath :: Maybe String -> PackageName -> StringMapState (PackageName, Source.PackageSpec)
-    buildLocalPath source name = do
+    buildLocalPath :: Maybe String -> StringMapState Source.PackageSpec
+    buildLocalPath source = do
       path <- buildPath source
-      packageSpec name (Source.Path path)
+      packageSpec (Source.Path path)
 
-    buildGit :: Maybe String -> PackageName -> StringMapState (PackageName, Source.PackageSpec)
-    buildGit source name = do
+    buildGit :: Maybe String -> StringMapState Source.PackageSpec
+    buildGit source = do
       urlArg <- optionalAttrT "url"
       gitRef <- optionalAttrT "ref"
       gitUrl <- lift $ toRight
         ("--url or source required")
         (urlArg <|> source)
-      packageSpec name $ Source.Git $ Source.GitSpec {
+      packageSpec $ Source.Git $ Source.GitSpec {
         Source.gitUrl,
         Source.gitRef = Source.Template (gitRef `orElse` defaultGitRef)
       }
 
-    buildGitLocal :: Maybe String -> PackageName -> StringMapState (PackageName, Source.PackageSpec)
-    buildGitLocal source name = do
+    buildGitLocal :: Maybe String -> StringMapState Source.PackageSpec
+    buildGitLocal source = do
       glPath <- buildPath source
       ref <- optionalAttrT "ref"
-      packageSpec name $ Source.GitLocal $ Source.GitLocalSpec {
+      packageSpec $ Source.GitLocal $ Source.GitLocalSpec {
         Source.glPath,
         Source.glRef = (Source.Template (ref `orElse` "HEAD"))
       }
 
-    buildUrl :: Source.UrlFetchType -> Maybe String -> PackageName -> StringMapState (PackageName, Source.PackageSpec)
-    buildUrl urlType source name = do
+    buildUrl :: Source.UrlFetchType -> Maybe String -> StringMapState Source.PackageSpec
+    buildUrl urlType source = do
       urlAttr <- optionalAttrT "url"
       url <- lift $ toRight "--url or souce required" (urlAttr <|> source)
-      packageSpec name $ Source.Url Source.UrlSpec {
+      packageSpec $ Source.Url Source.UrlSpec {
         Source.urlType = urlType,
         Source.url = Source.Template url
       }
 
-    buildGithub :: Maybe String -> Maybe PackageName -> StringMapState (PackageName, Source.PackageSpec)
+    buildGithub :: Maybe String -> Maybe PackageName -> StringMapState (Maybe PackageName, Source.PackageSpec)
     buildGithub source name = do
       (name, ghOwner, ghRepo) <- identity
       ref <- optionalAttrT "ref"
-      packageSpec name $ Source.Github Source.GithubSpec {
+      withName (Just name) $ packageSpec $ Source.Github Source.GithubSpec {
         Source.ghOwner,
         Source.ghRepo,
         Source.ghRef = Source.Template . fromMaybe "master" $ ref
@@ -257,8 +252,23 @@ parseAdd =
             fromSource = parseSource <$> source
             fromName = parseSource <$> unPackageName <$> name
 
-parsePackageAttrs :: Opts.Parser (StringMap)
-parsePackageAttrs = HMap.fromList <$> many parseAttribute where
+parseAdd :: Opts.Parser (Either AppError (PackageName, Source.PackageSpec))
+parseAdd = build
+    <$> Opts.optional parseName
+    <*> Opts.optional parseSource
+    <*> parsePackageAttrs ParsePackageAttrsFull
+  where
+    parseSource = Opts.argument Opts.str (Opts.metavar "SOURCE")
+    build :: Maybe PackageName -> Maybe String -> StringMap -> Either AppError (PackageName, Source.PackageSpec)
+    build nameOpt source attrs = do
+      (name, package) <- processAdd nameOpt source attrs
+      name <- toRight (AppError "--name required") name
+      return (name, package)
+
+data ParsePackageAttrsMode = ParsePackageAttrsFull | ParsePackageAttrsSource
+
+parsePackageAttrs :: ParsePackageAttrsMode -> Opts.Parser (StringMap)
+parsePackageAttrs mode = HMap.fromList <$> many parseAttribute where
   parseAttribute :: Opts.Parser (String, String)
   parseAttribute =
     Opts.option (Opts.maybeReader parseKeyVal)
@@ -282,16 +292,18 @@ parsePackageAttrs = HMap.fromList <$> many parseAttribute where
 
   -- Shortcuts for known attributes
   shortcutAttributes :: Opts.Parser (String, String)
-  shortcutAttributes = foldr (<|>) empty $ mkShortcutAttribute <$>
-    [
+  shortcutAttributes = foldr (<|>) empty $ mkShortcutAttribute <$> shortcuts
+    where
+    shortcuts = case mode of
+      ParsePackageAttrsFull -> ("nix", "all") : sourceShortcuts
+      ParsePackageAttrsSource -> sourceShortcuts
+    sourceShortcuts = [
       ("ref", "github / git / git-local"),
       ("owner", "github"),
       ("repo", "github"),
       ("url", "url / file / git"),
       ("path", "git-local"),
-      ("version", "all"),
-      ("nix", "all")
-    ]
+      ("version", "all")]
 
   mkShortcutAttribute :: (String, String) -> Opts.Parser (String, String)
   mkShortcutAttribute (attr, types) =
@@ -428,7 +440,7 @@ cmdInit nixpkgs = do
         Source.ghRef = Source.Template channel
       },
       Source.fetchAttrs = HMap.empty,
-      Source.packageAttrs = HMap.fromList [("nix", "default.nix")]
+      Source.packageAttrs = HMap.fromList [("nix", defaultDepNixPath)]
     })]
 
     selfSpec isGit =
@@ -528,7 +540,7 @@ cmdRm maybeNames opts = do
 -------------------------------------------------------------------------------
 parseCmdUpdate :: Opts.ParserInfo (IO ())
 parseCmdUpdate = subcommand "Update one or more sources"
-  (cmdUpdate <$> parseNames <*> parsePackageAttrs <*> parseCommon)
+  (cmdUpdate <$> parseNames <*> parsePackageAttrs ParsePackageAttrsFull <*> parseCommon)
   [ examplesDoc [
     "nix-wrangle update pkgs --ref nixpkgs-unstable",
     "nix-wrangle update gup --nix nix/"
@@ -594,6 +606,7 @@ loadSource f = (,) f <$> Source.loadSourceFile f
 -------------------------------------------------------------------------------
 data SpliceOpts = SpliceOpts {
   spliceName :: Maybe PackageName,
+  spliceAttrs :: StringMap,
   spliceInput :: FilePath,
   spliceOutput :: FilePath
 }
@@ -609,13 +622,17 @@ parseCmdSplice = subcommand "Splice current `self` source into a .nix document"
       "",
       softDocLines [
         "This allows you to build a standalone",
-        ".nix file for publishing (e.g. to nixpkgs itself)"
-      ]
+        ".nix file for publishing (e.g. to nixpkgs itself)" ],
+      "",
+      softDocLines [
+        "If your source does not come from an existing wrangle.json,",
+        "you can pass it in explicitly as attributes, like with",
+        "`nix-wrangle add` (i.e. --type, --repo, --owner, --url, etc)"]
   ]]
   where
-    parseSplice = build <$> parseInput <*> parseOutput <*> parseName where
-      build spliceInput spliceOutput spliceName =
-        SpliceOpts { spliceInput, spliceOutput, spliceName }
+    parseSplice = build <$> parseInput <*> parseOutput <*> parseName <*> parsePackageAttrs ParsePackageAttrsSource where
+      build spliceInput spliceOutput spliceName spliceAttrs =
+        SpliceOpts { spliceInput, spliceOutput, spliceName, spliceAttrs }
     parseInput = Opts.argument Opts.str (Opts.metavar "SOURCE")
     parseName = Opts.optional (PackageName <$> Opts.strOption
       ( Opts.long "name" <>
@@ -631,21 +648,33 @@ parseCmdSplice = subcommand "Splice current `self` source into a .nix document"
       ))
 
 cmdSplice :: SpliceOpts -> CommonOpts -> IO ()
-cmdSplice (SpliceOpts { spliceName, spliceInput, spliceOutput}) opts =
-  do
-    fileContents <- Splice.load spliceInput
-    let expr = Splice.parse fileContents
-    expr <- Splice.getExn expr
-    -- putStrLn $ show $ expr
-    sourceFiles <- requireConfiguredSources $ sources opts
-    sources <- Source.merge <$> Source.loadSources sourceFiles
-    self <- liftEither $ Source.lookup (spliceName `orElse` PackageName "self") sources
-    let existingSrcSpans = Splice.extractSourceLocs expr
-    srcSpan <- case existingSrcSpans of
-      [single] -> return single
-      other -> fail $ "No single source found in " ++ (show other)
-    replacedText <- liftEither $ Splice.replaceSourceLoc fileContents self srcSpan
-    Source.writeFileText spliceOutput replacedText
+cmdSplice (SpliceOpts { spliceName, spliceAttrs, spliceInput, spliceOutput}) opts = do
+  fileContents <- Splice.load spliceInput
+  let expr = Splice.parse fileContents
+  expr <- Splice.getExn expr
+  -- putStrLn $ show $ expr
+  let existingSrcSpans = Splice.extractSourceLocs expr
+  srcSpan <- case existingSrcSpans of
+    [single] -> return single
+    other -> fail $ "No single source found in " ++ (show other)
+  self <- getSelf
+  replacedText <- liftEither $ Splice.replaceSourceLoc fileContents self srcSpan
+  Source.writeFileText spliceOutput replacedText
+
+  where
+    getSelf :: IO Source.PackageSpec
+    getSelf = case (spliceName, spliceAttrs) of
+      (Nothing, attrs) ->
+        -- For splicing, we support a subset of `add` arguments. We don't
+        -- accept a name or source, only explicit attrs
+        liftEither $ snd <$> processAdd Nothing Nothing attrs
+
+      (name, attrs) | HMap.null attrs -> do
+        sourceFiles <- requireConfiguredSources $ sources opts
+        sources <- Source.merge <$> Source.loadSources sourceFiles
+        liftEither $ Source.lookup (name `orElse` PackageName "self") sources
+
+      (Just _, _nonEmpty) -> throwM $ AppError ("name or addSpec required, both given")
 
 -------------------------------------------------------------------------------
 -- default-nix
@@ -688,6 +717,8 @@ updateDefaultNix (DefaultNixOpts { force }) = do
         (T.isInfixOf markerText) <$> TE.decodeUtf8 <$> B.readFile path
       else
         return True
+
+defaultDepNixPath = "default.nix"
 
 defaultNixContents = [QQ.s|
 let

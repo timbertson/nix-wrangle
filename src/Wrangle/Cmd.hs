@@ -417,7 +417,7 @@ parseCmdInit = subcommand "Initialize nix-wrangle" (
 cmdInit :: Maybe String -> IO ()
 cmdInit nixpkgs = do
   isGit <- Dir.doesFileExist ".git"
-  addMultiple OverwriteSource (Right (selfSpec isGit : wrangleSpec : nixpkgsSpecs)) commonOpts
+  addMultiple OverwriteSource NoAutoInit (Right (selfSpec isGit : wrangleSpec : nixpkgsSpecs)) commonOpts
   updateDefaultNix defaultNixOptsDefault
   where
     commonOpts = CommonOpts { sources = Nothing }
@@ -460,6 +460,8 @@ cmdInit nixpkgs = do
 
 data AddMode = AddSource | OverwriteSource | AddIfMissing
 
+data AutoInit = AutoInit | NoAutoInit
+
 parseCmdAdd :: Opts.ParserInfo (IO ())
 parseCmdAdd = subcommand "Add a source" (cmdAdd <$> parseAddMode <*> parseAdd <*> parseCommon)
   [ examplesDoc [
@@ -473,15 +475,14 @@ parseCmdAdd = subcommand "Add a source" (cmdAdd <$> parseAddMode <*> parseAdd <*
     parseAddMode = Opts.flag AddSource OverwriteSource
       (Opts.long "replace" <> Opts.help "Replace existing source")
 
-addMultiple :: AddMode -> Either AppError [(PackageName, Source.PackageSpec)] -> CommonOpts -> IO ()
-addMultiple addMode addOpts opts =
+addMultiple :: AddMode -> AutoInit -> Either AppError [(PackageName, Source.PackageSpec)] -> CommonOpts -> IO ()
+addMultiple addMode autoInit addOpts opts =
   do
     addSpecs <- liftEither $ addOpts
     configuredSources <- Source.configuredSources $ sources opts
     let sourceFile = NonEmpty.head <$> configuredSources
     debugLn $ "sourceFile: " <> show sourceFile
-    let loadedSourceFile = tryLoadSource <$> sourceFile
-    source :: (Source.SourceFile, Maybe Source.Packages) <- fromMaybe (return (Source.DefaultSource, Nothing)) loadedSourceFile
+    source <- loadOrInit autoInit sourceFile
     debugLn $ "source: " <> show source
     let (sourceFile, inputSource) = source
     let baseSource = fromMaybe (Source.emptyPackages) inputSource
@@ -498,9 +499,17 @@ addMultiple addMode addOpts opts =
       else
         return base
 
-    tryLoadSource :: Source.SourceFile -> IO (Source.SourceFile, Maybe Source.Packages)
+    loadOrInit :: AutoInit -> Maybe Source.SourceFile -> IO (Source.SourceFile, Maybe Source.Packages)
     -- TODO: arrows?
-    tryLoadSource f = do
+    loadOrInit AutoInit Nothing = do
+      let source = Source.DefaultSource
+      infoLn $ Source.pathOfSource source <> " does not exist, initializing..."
+      cmdInit Nothing
+      loadOrInit NoAutoInit (Just source)
+
+    loadOrInit NoAutoInit Nothing = return (Source.DefaultSource, Nothing)
+
+    loadOrInit _ (Just f) = do
       exists <- Source.doesSourceExist f
       loaded <- sequence $ if exists
         then Just $ Source.loadSourceFile f
@@ -517,7 +526,7 @@ addMultiple addMode addOpts opts =
       else return True
 
 cmdAdd :: AddMode -> Either AppError (PackageName, Source.PackageSpec) -> CommonOpts -> IO ()
-cmdAdd addMode addOpt opts = addMultiple addMode ((\x -> [x]) <$> addOpt) opts
+cmdAdd addMode addOpt opts = addMultiple addMode AutoInit ((\x -> [x]) <$> addOpt) opts
 
 -------------------------------------------------------------------------------
 -- Rm

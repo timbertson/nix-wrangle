@@ -487,6 +487,7 @@ addMultiple addMode autoInit addOpts opts =
     let (sourceFile, inputSource) = source
     let baseSource = fromMaybe (Source.emptyPackages) inputSource
     modifiedSource <- foldM addSingle baseSource addSpecs
+    Dir.createDirectoryIfMissing True $ PosixPath.takeDirectory (Source.pathOfSource sourceFile)
     Source.writeSourceFile sourceFile modifiedSource
   where
     addSingle :: Source.Packages -> (PackageName, Source.PackageSpec) -> IO Source.Packages

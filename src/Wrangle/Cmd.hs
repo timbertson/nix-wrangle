@@ -215,6 +215,11 @@ processAdd nameOpt source attrs = mapLeft AppError $ build nameOpt source attrs
         Source.url = Source.Template url
       }
 
+    parseGithubSource :: Maybe PackageName -> String -> Either String (PackageName, String, String)
+    parseGithubSource name source = case span (/= '/') source of
+      (owner, '/':repo) -> Right (fromMaybe (PackageName repo) name, owner, repo)
+      _ -> throwError ("`" <> source <> "` doesn't look like a github repo")
+
     buildGithub :: Maybe String -> Maybe PackageName -> StringMapState (Maybe PackageName, Source.PackageSpec)
     buildGithub source name = do
       (name, ghOwner, ghRepo) <- identity
@@ -225,12 +230,6 @@ processAdd nameOpt source attrs = mapLeft AppError $ build nameOpt source attrs
         Source.ghRef = Source.Template . fromMaybe "master" $ ref
       }
       where
-        parseSource :: String -> Either String (PackageName, String, String)
-        parseSource source =
-          case span (/= '/') source of
-              (owner, '/':repo) -> Right (fromMaybe (PackageName repo) name, owner, repo)
-              _ -> throwError ("`" <> source <> "` doesn't look like a github repo")
-
         explicitSource (owner, repo) = (fromMaybe (PackageName repo) name, owner, repo)
 
         identity :: StringMapState (PackageName, String, String)
@@ -240,17 +239,17 @@ processAdd nameOpt source attrs = mapLeft AppError $ build nameOpt source attrs
           lift $ buildIdentity owner repo
 
         buildIdentity :: Maybe String -> Maybe String -> Either String (PackageName, String, String)
-        buildIdentity owner repo = case (explicit, fromSource, fromName) of
-            (Just explicit, Nothing, _) -> Right explicit
-            (Nothing, Just source, _) -> source
-            (Nothing, Nothing, Just name) -> name
+        buildIdentity owner repo = case (fromAttrs, fromSource, fromNameAsSource) of
+            (Just fromAttrs, Nothing, _) -> Right fromAttrs
+            (Nothing, Just fromSource, _) -> fromSource
+            (Nothing, Nothing, Just fromName) -> fromName
             (Nothing, Nothing, Nothing) -> throwError "name, source or --owner/--repo required"
             (Just _, Just _, _) -> throwError "use source or --owner/--repo, not both"
           where
             ownerAndRepo :: Maybe (String, String) = (,) <$> owner <*> repo
-            explicit :: Maybe (PackageName, String, String) = explicitSource <$> ownerAndRepo
-            fromSource = parseSource <$> source
-            fromName = parseSource <$> unPackageName <$> name
+            fromAttrs :: Maybe (PackageName, String, String) = explicitSource <$> ownerAndRepo
+            fromSource = parseGithubSource name <$> source
+            fromNameAsSource = parseGithubSource Nothing <$> unPackageName <$> name
 
 parseAdd :: Opts.Parser (Either AppError (PackageName, Source.PackageSpec))
 parseAdd = build

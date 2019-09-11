@@ -613,11 +613,13 @@ loadSource f = (,) f <$> Source.loadSourceFile f
 -------------------------------------------------------------------------------
 -- Splice
 -------------------------------------------------------------------------------
+data SpliceOutput = SpliceOutput FilePath | SpliceReplace
 data SpliceOpts = SpliceOpts {
   spliceName :: Maybe PackageName,
   spliceAttrs :: StringMap,
   spliceInput :: FilePath,
-  spliceOutput :: FilePath
+  spliceOutput :: SpliceOutput,
+  spliceUpdate :: Bool
 }
 
 parseCmdSplice :: Opts.ParserInfo (IO ())
@@ -639,9 +641,9 @@ parseCmdSplice = subcommand "Splice current `self` source into a .nix document"
         "`nix-wrangle add` (i.e. --type, --repo, --owner, --url, etc)"]
   ]]
   where
-    parseSplice = build <$> parseInput <*> parseOutput <*> parseName <*> parsePackageAttrs ParsePackageAttrsSource where
-      build spliceInput spliceOutput spliceName spliceAttrs =
-        SpliceOpts { spliceInput, spliceOutput, spliceName, spliceAttrs }
+    parseSplice = build <$> parseInput <*> parseOutput <*> parseName <*> parsePackageAttrs ParsePackageAttrsSource <*> parseUpdate where
+      build spliceInput spliceOutput spliceName spliceAttrs spliceUpdate =
+        SpliceOpts { spliceInput, spliceOutput, spliceName, spliceAttrs, spliceUpdate }
     parseInput = Opts.argument Opts.str (Opts.metavar "SOURCE")
     parseName = Opts.optional (PackageName <$> Opts.strOption
       ( Opts.long "name" <>
@@ -649,15 +651,25 @@ parseCmdSplice = subcommand "Splice current `self` source into a .nix document"
         Opts.metavar "NAME" <>
         Opts.help ("Source name to use (default: self)")
       ))
-    parseOutput = (Opts.strOption
+    parseOutput = explicitOutput <|> replaceOutput
+    replaceOutput = Opts.flag' SpliceReplace
+      ( Opts.long "replace" <>
+        Opts.short 'r' <>
+        Opts.help "Overwrite input file"
+      )
+    explicitOutput = SpliceOutput <$> (Opts.strOption
       ( Opts.long "output" <>
         Opts.short 'o' <>
         Opts.metavar "DEST" <>
         Opts.help ("Destination file")
       ))
+    parseUpdate = Opts.flag True False
+      ( Opts.long "no-update" <>
+        Opts.help "Don't fetch the latest version of `self` before splicing"
+      )
 
 cmdSplice :: SpliceOpts -> CommonOpts -> IO ()
-cmdSplice (SpliceOpts { spliceName, spliceAttrs, spliceInput, spliceOutput}) opts = do
+cmdSplice (SpliceOpts { spliceName, spliceAttrs, spliceInput, spliceOutput, spliceUpdate}) opts = do
   fileContents <- Splice.load spliceInput
   let expr = Splice.parse fileContents
   expr <- Splice.getExn expr
@@ -667,23 +679,32 @@ cmdSplice (SpliceOpts { spliceName, spliceAttrs, spliceInput, spliceOutput}) opt
     [single] -> return single
     other -> fail $ "No single source found in " ++ (show other)
   self <- getSelf
+  debugLn $ "got self: " <> show self
   replacedText <- liftEither $ Splice.replaceSourceLoc fileContents self srcSpan
-  Source.writeFileText spliceOutput replacedText
+  Source.writeFileText outputPath replacedText
 
   where
-    getSelf :: IO Source.PackageSpec
-    getSelf = case (spliceName, spliceAttrs) of
-      (Nothing, attrs) ->
-        -- For splicing, we support a subset of `add` arguments. We don't
-        -- accept a name or source, only explicit attrs
-        liftEither $ snd <$> processAdd Nothing Nothing attrs
+    outputPath = case spliceOutput of
+      SpliceOutput p -> p
+      SpliceReplace -> spliceInput
 
-      (name, attrs) | HMap.null attrs -> do
+    getSelf :: IO Source.PackageSpec
+    getSelf =
+      if HMap.null spliceAttrs then do
         sourceFiles <- requireConfiguredSources $ sources opts
         sources <- Source.merge <$> Source.loadSources sourceFiles
-        liftEither $ Source.lookup (name `orElse` PackageName "self") sources
-
-      (Just _, _nonEmpty) -> throwM $ AppError ("name or addSpec required, both given")
+        let name = (spliceName `orElse` PackageName "self")
+        if spliceUpdate then
+          cmdUpdate (Just $ name :| []) HMap.empty opts
+        else
+          return ()
+        liftEither $ Source.lookup name sources
+      else do
+        -- For splicing, we support a subset of `add` arguments. We don't
+        -- accept a name or source, only explicit spliceAttrs
+        infoLn $ "Splicing anonymous source from attributes: " <> show spliceAttrs
+        self <- liftEither $ snd <$> processAdd Nothing Nothing spliceAttrs
+        Fetch.prefetch (PackageName "self") self
 
 -------------------------------------------------------------------------------
 -- default-nix

@@ -323,7 +323,7 @@ updatePackageSpec original attrs = mergedJSON >>= liftResult <$> fromJSON where
 
 loadSourceFile :: SourceFile -> IO Packages
 loadSourceFile source = do
-  putStrLn $ "Reading sources: " ++ sourcePath
+  debugLn $ "Reading sources: " ++ sourcePath
   contents <- eitherDecodeFileStrict sourcePath
   liftEither $ mapLeft invalidSourceDocument contents
   where

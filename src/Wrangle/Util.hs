@@ -39,6 +39,9 @@ mapLeft _ (Right x) = Right x
 orElse (Just x) _ = x
 orElse Nothing x = x
 
+optList (Just x) = [x]
+optList Nothing = []
+
 orEither (Right x) _ = x
 orEither (Left _) dfl = dfl
 

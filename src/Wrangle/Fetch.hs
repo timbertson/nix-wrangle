@@ -92,8 +92,10 @@ prefetch name pkg = do
 
   -- *Local require no prefetching:
   resolveAttrs (GitLocal (GitLocalSpec { glPath, glRef })) = do
-    ref <- liftEither $ render glRef
-    return $ [("ref", ref)] <> toStringPairs glPath
+    ref <- liftEither $ sequence $ render <$> glRef
+    return $ optList (refAttr <$> ref) <> toStringPairs glPath
+    where
+      refAttr ref = ("ref", ref)
 
   resolveAttrs (Path p) = do
     return $ toStringPairs p

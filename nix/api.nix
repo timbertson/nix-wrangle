@@ -4,12 +4,13 @@ let
 	_nixpkgs = pkgs;
 	utils = rec {
 		# sub-tools implemented in their own nix files
-		nixImpure = _nixpkgs.callPackage ./nixImpure.nix {};
 		importDrv = _nixpkgs.callPackage ./importDrv.nix {};
-		exportLocalGit = _nixpkgs.callPackage ./exportLocalGit.nix { inherit nixImpure; };
+		exportLocalGit = _nixpkgs.callPackage ./exportLocalGit.nix { };
 		overrideSrc = _nixpkgs.callPackage ./overrideSrc.nix { inherit importDrv; };
-		unpackArchive = _nixpkgs.callPackage ./unpackArchive.nix {};
 	};
+
+	augmentGitLocalArgs = { path, commit ? null, ref ? null }@args:
+		if commit == null && ref == null then (args // { workingChanges = true; }) else args;
 
 	# exposed for testing
 	internal = with api; rec {
@@ -39,7 +40,7 @@ let
 			github = fetchFromGitHub;
 			url = fetchurl;
 			git = fetchgit;
-			git-local = withRelativePath exportLocalGit;
+			git-local = withRelativePath (args: exportLocalGit (augmentGitLocalArgs args));
 			path = withRelativePath ({ path }: "${path}");
 			_passthru = arg: arg; # used in tests
 		};
@@ -54,15 +55,11 @@ let
 		in
 		foldl recursiveUpdate {} attrs;
 
-		mergeImportsInto = pkgs: attrs:
+		importScope = pkgs: attrs:
 			let
-				mergedPkgs = foldl' mergeFn pkgs (attrValues attrs);
-				mergeFn = base: node:
-					# convert each node into a sparse recursive attrset
-					# and merge into base recursively
-					recursiveUpdateUntil (path: l: r: r == node.drv) base (implAttrset node);
+				derivations = mapAttrs (name: node: node.drv) attrs;
 			in
-			mergedPkgs // { callPackage = pkgs.newScope mergedPkgs; };
+			pkgs // { callPackage = pkgs.newScope derivations; };
 
 		makeImport = { settings, pkgs }: name: attrs:
 			let
@@ -101,7 +98,7 @@ let
 			let
 				imports = (mapAttrs (makeImport {
 					inherit settings;
-					pkgs = mergeImportsInto _nixpkgs imports;
+					pkgs = importScope pkgs imports;
 				}) json);
 			in
 			imports;
@@ -193,7 +190,7 @@ let
 				# local sources. This is used in recursive wrangle, to
 				# override a dependency. Note that `provided` defaults pkgs & nix-wrangle to `null`
 				extantProvided = filterAttrs (n: v: v != null) _provided;
-				mergedPkgs = (internal.mergeImportsInto pkgs imports.sources) // extantProvided;
+				mergedPkgs = (internal.importScope pkgs imports.sources) // extantProvided;
 				base = mergedPkgs.callPackage nixPath _args;
 				selfSrc = imports.sources.self or null;
 			in

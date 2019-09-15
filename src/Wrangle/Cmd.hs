@@ -203,7 +203,7 @@ processAdd nameOpt source attrs = mapLeft AppError $ build nameOpt source attrs
       ref <- optionalAttrT "ref"
       packageSpec $ Source.GitLocal $ Source.GitLocalSpec {
         Source.glPath,
-        Source.glRef = (Source.Template (ref `orElse` "HEAD"))
+        Source.glRef = Source.Template <$> ref
       }
 
     buildUrl :: Source.UrlFetchType -> Maybe String -> StringMapState Source.PackageSpec
@@ -446,7 +446,7 @@ cmdInit nixpkgs = do
       (PackageName "self", Source.PackageSpec {
         Source.sourceSpec = if isGit then (Source.GitLocal Source.GitLocalSpec {
           Source.glPath = localPath,
-          Source.glRef = Source.Template "HEAD"
+          Source.glRef = Nothing
         }) else (Source.Path localPath),
         Source.fetchAttrs = HMap.empty,
         Source.packageAttrs = HMap.empty

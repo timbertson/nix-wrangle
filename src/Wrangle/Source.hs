@@ -186,12 +186,13 @@ instance ToStringPairs LocalPath where
 
 data GitLocalSpec = GitLocalSpec {
   glPath :: LocalPath,
-  glRef :: Template
+  glRef :: Maybe Template
 } deriving (Show, Eq)
 
 instance ToStringPairs GitLocalSpec where
   toStringPairs GitLocalSpec { glPath, glRef } =
-    (toStringPairs glPath) <> [("ref", asString glRef)]
+    (toStringPairs glPath) <> optList (refAttr <$> glRef) where
+      refAttr ref = ("ref", asString ref)
 
 data SourceSpec
   = Github GithubSpec
@@ -217,13 +218,13 @@ parseSourceSpecObject fetcher attrs = parseFetcher fetcher >>= parseSpec
     parseSpec :: FetchType -> Parser SourceSpec
     parseSpec fetcher = case fetcher of
       FetchGithub ->
-        build <$> owner <*> repo <*> ref where
+        build <$> owner <*> repo <*> refRequired where
           build ghOwner  ghRepo  ghRef = Github $ GithubSpec {
                 ghOwner, ghRepo, ghRef }
-      FetchGit -> build <$> url <*> ref where
+      FetchGit -> build <$> url <*> refRequired where
         build gitUrl gitRef = Git $ GitSpec { gitUrl, gitRef }
       FetchGitLocal ->
-        build <$> path <*> ref where
+        build <$> path <*> refOpt where
           build glPath glRef = GitLocal $ GitLocalSpec { glPath, glRef }
       FetchPath -> Path <$> path
       (FetchUrl t) -> buildUrl t <$> url
@@ -231,7 +232,8 @@ parseSourceSpecObject fetcher attrs = parseFetcher fetcher >>= parseSpec
     repo = attrs .: "repo"
     url = attrs .: "url"
     path = (FullPath <$> attrs .: "path") <|> (RelativePath <$> attrs .: "relativePath")
-    ref :: Parser Template = attrs .: "ref"
+    refRequired :: Parser Template = attrs .: "ref"
+    refOpt :: Parser (Maybe Template) = attrs .:? "ref"
     buildUrl urlType url = Url $ UrlSpec { urlType, url = Template url }
     invalid v = fail $ "Unable to parse SourceSpec from: " <> (encodePrettyString v)
 

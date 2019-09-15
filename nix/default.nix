@@ -1,7 +1,7 @@
 { stdenv, lib, git, callPackage, makeWrapper, fetchFromGitHub, haskellPackages }:
 # ./wrangle.nix is the vanilla cabal2nix output, so we wrap it here:
 (haskellPackages.callPackage ./wrangle.nix {}).overrideAttrs (o: rec {
-	src = abort "`src` not overridden";
+	src = ../.;
 	nativeBuildInputs = (o.nativeBuldInputs or []) ++ [makeWrapper];
 	installPhase = o.installPhase + ''
 		mkdir -p "$out/share"

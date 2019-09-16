@@ -133,7 +133,7 @@ let
 			jsonSources = lib.foldl (a: b: a // b) {} jsonSourcesList;
 			jsonSourcesExtended = if extend == null then jsonSources else (
 				# extend only acts on `sources`, not the full attrset
-				recursiveUpdate jsonSources (extend jsonSources)
+				jsonSources // (extend jsonSources)
 			);
 		in
 		{

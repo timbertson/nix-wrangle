@@ -46,14 +46,6 @@ let
 	};
 
 	checks = [
-		(eq "implAttrset with no explicit path"
-			(internal.implAttrset { attrs = {}; name = "foo"; drv = 1; })
-			{ foo = 1; })
-
-		(eq "implAttrset with multiple paths"
-			(internal.implAttrset { attrs = { attrPaths = ["foo" "bar.baz"]; }; drv = 1; })
-			{ foo = 1; bar = { baz = 1; }; })
-
 		["implPath is path" (isString (makeImport "name" versionSrc).nix)]
 
 		((result: eq "returns source if nix is unset" result.src result.drv)
@@ -67,10 +59,19 @@ let
 
 		(eq "passthru attrs" (makeImport "name" versionSrc).attrs versionSrc)
 
-		["mergeImportsInto produces valid derivations"
-			(isDerivation (internal.mergeImportsInto pkgs {
-				version = (makeImport "pythonPackages.versionOverride" versionSrc);
-			}).pythonPackages.versionOverride)]
+		["importScope produces valid derivations"
+			(isDerivation (internal.importScope pkgs {
+				versionOverride = (makeImport "versionOverride" versionSrc);
+			}).versionOverride)]
+
+		(
+			let myPkgs = internal.importScope pkgs {
+				myVersion = makeImport "myVersion" versionSrc;
+			}; in
+			eq "importScope provides imports to callPackage invocations"
+			(myPkgs.callPackage ({ myVersion, curl }: [myVersion.name curl.name]) {})
+			[myPkgs.myVersion.name curl.name]
+		)
 
 		["makes derivations" (isDerivation (api.derivations { sources = [ version ]; }).version)]
 
@@ -118,9 +119,9 @@ let
 
 		(eq "imports from git when path is not a store path" (
 			let result = ((internal.makeFetchers { path = ./storeSrc; })
-				.git-local { relativePath = "."; ref="HEAD"; }); in
-			[(typeOf result) (isDerivation result)]
-		) ["set" true])
+				.git-local { relativePath = "../.."; ref="HEAD"; }); in
+			result
+		) (builtins.fetchGit { url = ../.; ref="HEAD"; }) )
 
 		(eq "uses store path directly path is a store path" (
 			# "${x}" copies path x into the store
@@ -145,24 +146,6 @@ let
 				both = { type="git"; key2 = "key2value2"; key3 = "key3value2"; };
 				second = { type="git"; key = "value2"; };
 			})
-
-		(eq "mergeImportsInto merges up to attr path"
-			(let
-				base = {
-					a.b.c = {
-						d = lib.const 1;
-						version = {
-							e = "super";
-							src = lib.warn "evaluating `const 1`" (const 1);
-						};
-					};
-				};
-				result = internal.mergeImportsInto base {
-					version = (makeImport "a.b.c.version" versionSrc);
-				};
-			in (attrNames result.a.b.c) ++ [(result.a.b.c.version ? e) result.a.b.c.version.src.drvPath])
-			["d" "version" false ((makeImport "name" versionSrc).src.drvPath)]
-		)
 
 		(eq "allows overriding of individual package invocations" "injected" (api.derivations {
 			sources = [ version ];

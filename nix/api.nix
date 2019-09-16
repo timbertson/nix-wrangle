@@ -45,21 +45,8 @@ let
 			_passthru = arg: arg; # used in tests
 		};
 
-		implAttrPaths = node:
-			map (splitString ".") (node.attrs.attrPaths or [node.name]);
-
-		implAttrset = node:
-		let
-			paths = implAttrPaths node;
-			attrs = map (path: setAttrByPath path node.drv) paths;
-		in
-		foldl recursiveUpdate {} attrs;
-
 		importScope = pkgs: attrs:
-			let
-				derivations = mapAttrs (name: node: node.drv) attrs;
-			in
-			pkgs // { callPackage = pkgs.newScope derivations; };
+			lib.makeScope pkgs.newScope (self: mapAttrs (name: node: node.drv) attrs);
 
 		makeImport = { settings, pkgs }: name: attrs:
 			let

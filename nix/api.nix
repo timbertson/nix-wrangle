@@ -12,6 +12,8 @@ let
 	augmentGitLocalArgs = { path, commit ? null, ref ? null }@args:
 		if commit == null && ref == null then (args // { workingChanges = true; }) else args;
 
+	isPath = p: builtins.typeOf p == "path";
+
 	# exposed for testing
 	internal = with api; rec {
 		makeFetchers = { path }:
@@ -19,7 +21,7 @@ let
 				# inject support for `relativePath` as long as
 				# we were invoked with a base path
 				let
-					fromStore = lib.isStorePath path;
+					fromStore = isStorePath path;
 					basePath = if fromStore then path else builtins.toString path;
 					joinPath = relativePath:
 						if path == null
@@ -71,10 +73,13 @@ let
 					# If attrs.nix == null, we return the source instead of a derivation
 					if nix == null
 						then builtins.trace "[wrangle] Providing ${name} (source-only) from ${src}" src
-						else builtins.trace "[wrangle] Importing ${name} from ${nix}" (overrideSrc {
-							inherit src version;
-							drv = callImpl args;
-						});
+						else
+							let drv = callImpl args; src = drv.src or null; in
+							if isPath src && isStorePath src
+								then drv
+								else builtins.trace "[wrangle] Importing ${name} from ${nix}" (
+									overrideSrc { inherit src version drv; }
+								);
 				drv = callWith { inherit pkgs; path = nix; };
 			in
 			{ inherit name attrs src version nix drv; };
@@ -159,9 +164,6 @@ let
 			extend ? null,
 		}:
 			let
-				isPath = p: builtins.typeOf p == "path";
-				# if nix _is_ a path, it can act as `path` argument too
-				# we use toString to prevent actually importing `path`
 				pathStr =
 					# if `path` is not already in the store, we coerce it to a string
 					# so we don't auto-import it. Requires `--option build-use-chroot false`

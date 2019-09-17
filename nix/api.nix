@@ -12,8 +12,6 @@ let
 	augmentGitLocalArgs = { path, commit ? null, ref ? null }@args:
 		if commit == null && ref == null then (args // { workingChanges = true; }) else args;
 
-	isPath = p: builtins.typeOf p == "path";
-
 	# exposed for testing
 	internal = with api; rec {
 		makeFetchers = { path }:
@@ -73,13 +71,10 @@ let
 					# If attrs.nix == null, we return the source instead of a derivation
 					if nix == null
 						then builtins.trace "[wrangle] Providing ${name} (source-only) from ${src}" src
-						else
-							let drv = callImpl args; src = drv.src or null; in
-							if isPath src && isStorePath src
-								then drv
-								else builtins.trace "[wrangle] Importing ${name} from ${nix}" (
-									overrideSrc { inherit src version drv; }
-								);
+						else builtins.trace "[wrangle] Importing ${name} from ${nix}" (overrideSrc {
+							inherit src version;
+							drv = callImpl args;
+						});
 				drv = callWith { inherit pkgs; path = nix; };
 			in
 			{ inherit name attrs src version nix drv; };

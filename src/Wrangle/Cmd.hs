@@ -54,7 +54,6 @@ parseCommand = Opts.subparser (
   Opts.command "update" parseCmdUpdate <>
   Opts.command "splice" parseCmdSplice <>
   Opts.command "show" parseCmdShow <>
-  Opts.command "prebuild" parseCmdPrebuild <>
   Opts.command "ls" parseCmdLs <>
   Opts.command "default-nix" parseCmdDefaultNix
   ) <|> Opts.subparser (
@@ -347,7 +346,7 @@ cmdLs opts =
     sources <- Source.loadSources sourceFiles
     putStrLn $
       intercalate "\n" $
-      map (\s -> " - "<> Source.asString s) $
+      map (\s -> " - "<> asString s) $
       HMap.keys $ Source.unPackages $
       Source.merge $ sources
 
@@ -355,47 +354,6 @@ requireConfiguredSources :: Maybe (NonEmpty Source.SourceFile) -> IO (NonEmpty S
 requireConfiguredSources sources =
   Source.configuredSources sources >>=
     (liftMaybe (AppError "No wrangle JSON files found"))
-
--------------------------------------------------------------------------------
--- Prebuild
--------------------------------------------------------------------------------
-data PrebuildMode = PrebuildAll | PrebuildDefault
-
-parseCmdPrebuild :: Opts.ParserInfo (IO ())
-parseCmdPrebuild = subcommand "Prebuild local sources" (cmdPrebuild <$> parseCommon <*> parsePrebuildMode <*> parseNames) []
-  where
-    parsePrebuildMode :: Opts.Parser PrebuildMode
-    parsePrebuildMode = Opts.flag PrebuildAll PrebuildDefault
-      ( Opts.long "all" <>
-        Opts.short 'a' <>
-        Opts.help "Build all sources, not just local ones"
-      )
-
-cmdPrebuild :: CommonOpts -> PrebuildMode -> Maybe (NonEmpty PackageName) -> IO ()
-cmdPrebuild opts explicitMode packageNamesOpt = do
-  processPackagesNamed packageNamesOpt opts $ \sourceFile sources packageNames -> do
-    infoLn $ "Prebuilding " <> Source.pathOfSource sourceFile <> " ..."
-    sequence_ $ map (prebuildSingle sources) packageNames
-  where
-    mode = case packageNamesOpt of
-      (Just _) -> PrebuildAll
-      Nothing -> explicitMode
-    prebuildSingle packages name =
-      (liftEither $ Source.lookup name packages) >>= prebuildPackage name
-    prebuildPackage name pkg =
-      case (mode, Source.sourceSpec pkg) of
-      -- local paths can't be prebuilt since they're not a derivation,
-      -- but they also don't need it.
-      (_, Source.Path _) -> logSkip infoLn
-      (PrebuildAll, _) -> prebuild
-      (PrebuildDefault, Source.GitLocal _) -> prebuild
-      (PrebuildDefault, _) -> logSkip debugLn
-      where
-        typeStr = Source.fetcherNameWrangle . Source.fetchType . Source.sourceSpec $ pkg
-        logSkip printer = printer $ "Skipping: " <> asString name <> " ("<> typeStr<>")"
-        prebuild = do
-          infoLn $ "Building: " <> asString name <> " ("<>typeStr<>")"
-          Fetch.prebuild pkg
 
 -------------------------------------------------------------------------------
 -- Init
@@ -571,7 +529,7 @@ cmdUpdate packageNamesOpt updateAttrs opts =
       else return ()
     return $ Source.add packages name fetched
 
--- shared by update/rm/prebuild
+-- shared by update/rm
 -- TODO: pass actual source, since it is always Just
 processPackagesNamed :: Maybe (NonEmpty PackageName) -> CommonOpts
   -> (Source.SourceFile -> Source.Packages -> [PackageName] -> IO ())-> IO ()

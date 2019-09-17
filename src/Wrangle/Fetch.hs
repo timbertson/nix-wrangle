@@ -24,20 +24,6 @@ import qualified Data.Text as T
 import qualified System.Process as P
 import qualified System.Directory as Dir
 
-prebuild :: PackageSpec -> IO ()
-prebuild (PackageSpec { sourceSpec, fetchAttrs }) = do
-  apiContext <- globalApiContext
-  let cmd = extendCmd $
-            nixBuildCommand apiContext (fetchType sourceSpec) (HMap.toList fetchAttrs)
-  debugLn $ "+ " <> (show $ NonEmpty.toList cmd)
-  P.callProcess (NonEmpty.head cmd) (NonEmpty.tail cmd)
-  where
-    disableChroot = ("--option" :| ["build-use-chroot", "false"])
-    extendCmd base = case sourceSpec of
-      -- local builds require chroot disabled
-      (GitLocal _) -> base <> disableChroot
-      _ -> base
-
 prefetch :: PackageName -> PackageSpec -> IO PackageSpec
 prefetch name pkg = do
   infoLn $ "fetching " <> (show src)

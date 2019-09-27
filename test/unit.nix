@@ -69,8 +69,8 @@ let
 				myVersion = makeImport "myVersion" versionSrc;
 			}; in
 			eq "importScope provides imports to callPackage invocations"
-			(myPkgs.callPackage ({ myVersion, curl }: [myVersion.name curl.name]) {})
-			[myPkgs.myVersion.name curl.name]
+			(myPkgs.callPackage ({ myVersion, curl, pkgs }: [myVersion.name curl.name myPkgs.curl.name pkgs.curl.name]) {})
+			[myPkgs.myVersion.name curl.name curl.name curl.name]
 		)
 
 		["makes derivations" (isDerivation (api.derivations { sources = [ version ]; }).version)]

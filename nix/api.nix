@@ -50,7 +50,7 @@ let
 		};
 
 		importScope = pkgs: attrs:
-			lib.makeScope pkgs.newScope (self: mapAttrs (name: node: node.drv) attrs);
+			lib.makeScope pkgs.newScope (self: pkgs // mapAttrs (name: node: node.drv) attrs);
 
 		makeImport = { settings, pkgs }: name: attrs:
 			let
@@ -74,8 +74,8 @@ let
 				callWith = args:
 					# If attrs.nix == null, we return the source instead of a derivation
 					if nix == null
-						then builtins.trace "[wrangle] Providing ${name} (source-only) from ${src}" src
-						else builtins.trace "[wrangle] Importing ${name} from ${nix}" (overrideSrc {
+						then builtins.trace "[wrangle] Providing ${name} (source-only, ${fetcher}) from ${src}" src
+						else builtins.trace "[wrangle] Importing ${name} (${fetcher}) from ${nix}" (assert true; overrideSrc {
 							inherit src version;
 							drv = callImpl args;
 						});

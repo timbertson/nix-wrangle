@@ -386,7 +386,7 @@ cmdInit nixpkgs = do
         Source.ghRef = Source.Template "v1"
       },
       Source.fetchAttrs = HMap.empty,
-      Source.packageAttrs = HMap.fromList [("nix", "default.nix")]
+      Source.packageAttrs = HMap.fromList [("nix", "nix")]
     })
     nixpkgsSpecs = case nixpkgs of
       Nothing -> []

@@ -14,22 +14,26 @@ let
 
 	# exposed for testing
 	internal = with api; rec {
+
+		expandRelativePath = base: relative:
+			if base == null
+				then abort "relativePath only supported when using `inject` with a path"
+				# toString / toPath dance is carefully crafted to
+				#  - not import anything into the store, but also
+				#  - normalize paths (e.g. remove trailing /. )
+				else with builtins; toString (toPath ("${toString base}/${relative}"));
+
 		makeFetchers = { path }:
 			let withRelativePath = fn: args:
 				# inject support for `relativePath` as long as
 				# we were invoked with a base path
-				let
-					fromStore = isStorePath path;
-					basePath = if fromStore then path else builtins.toString path;
-					joinPath = relativePath:
-						if path == null
-							then abort "relativePath only supported when using `inject` with a path"
-							else "${basePath}/${relativePath}";
-				in
 				if args ? relativePath then (
 					# if we're fetching anything from a path which is already in the store,
 					# short-circuit and just use that path
-					let fullPath = joinPath args.relativePath; in
+					let
+						fromStore = isStorePath path;
+						fullPath = expandRelativePath path args.relativePath;
+					in
 					if fromStore
 						then fullPath
 						else fn ({ path = fullPath; } // (filterAttrs (n: v: n != "relativePath") args))

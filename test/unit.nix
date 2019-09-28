@@ -117,6 +117,10 @@ let
 			}).sources.upstreamGit.drv.git
 			pkgs.git)
 
+		(eq "normalizes paths and doesn't add them to the store" (
+			internal.expandRelativePath ./. "."
+		) ("${builtins.getEnv "PWD"}/test") )
+
 		(eq "imports from git when path is not a store path" (
 			let result = ((internal.makeFetchers { path = ./storeSrc; })
 				.git-local { relativePath = "../.."; ref="HEAD"; }); in
@@ -128,7 +132,7 @@ let
 			let result = ((internal.makeFetchers { path = "${./storeSrc}"; })
 				.git-local { relativePath = "."; ref="HEAD"; }); in
 			[(typeOf result) (isDerivation result) result]
-		) ["string" false "${./storeSrc}/."])
+		) ["string" false "${./storeSrc}"])
 
 		(eq "importFrom merges packages, not recursively" (
 			(api.importFrom { sources = [

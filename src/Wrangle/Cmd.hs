@@ -587,7 +587,7 @@ parseCmdSplice = subcommand "Splice current `self` source into a .nix document"
       softDocLines [
         "This command generates a copy of the input .nix file, with",
         "the `src` attribute replaced with the current fetcher for",
-        "the source named `self`."],
+        "the source named `public`."],
       "",
       softDocLines [
         "This allows you to build a standalone",
@@ -607,7 +607,7 @@ parseCmdSplice = subcommand "Splice current `self` source into a .nix document"
       ( Opts.long "name" <>
         Opts.short 'n' <>
         Opts.metavar "NAME" <>
-        Opts.help ("Source name to use (default: self)")
+        Opts.help ("Source name to use (default: public)")
       ))
     parseOutput = explicitOutput <|> replaceOutput
     replaceOutput = Opts.flag' SpliceReplace
@@ -623,7 +623,7 @@ parseCmdSplice = subcommand "Splice current `self` source into a .nix document"
       ))
     parseUpdate = Opts.flag True False
       ( Opts.long "no-update" <>
-        Opts.help "Don't fetch the latest version of `self` before splicing"
+        Opts.help "Don't fetch the latest version of `public` before splicing"
       )
 
 cmdSplice :: SpliceOpts -> CommonOpts -> IO ()
@@ -636,8 +636,8 @@ cmdSplice (SpliceOpts { spliceName, spliceAttrs, spliceInput, spliceOutput, spli
   srcSpan <- case existingSrcSpans of
     [single] -> return single
     other -> fail $ "No single source found in " ++ (show other)
-  self <- getSelf
-  debugLn $ "got self: " <> show self
+  self <- getPublic
+  debugLn $ "got source: " <> show self
   replacedText <- liftEither $ Splice.replaceSourceLoc fileContents self srcSpan
   Source.writeFileText outputPath replacedText
 
@@ -646,12 +646,12 @@ cmdSplice (SpliceOpts { spliceName, spliceAttrs, spliceInput, spliceOutput, spli
       SpliceOutput p -> p
       SpliceReplace -> spliceInput
 
-    getSelf :: IO Source.PackageSpec
-    getSelf =
+    getPublic :: IO Source.PackageSpec
+    getPublic =
       if HMap.null spliceAttrs then do
         sourceFiles <- requireConfiguredSources $ sources opts
         sources <- Source.merge <$> Source.loadSources sourceFiles
-        let name = (spliceName `orElse` PackageName "self")
+        let name = (spliceName `orElse` PackageName "public")
         if spliceUpdate then
           cmdUpdate (Just $ name :| []) HMap.empty opts
         else

@@ -117,9 +117,13 @@ let
 			}).sources.upstreamGit.drv.git
 			pkgs.git)
 
-		(eq "normalizes paths and doesn't add them to the store" (
-			internal.expandRelativePath ./. "."
+		(eq "normalizes non-store paths without adding them to the store" (
+			internal.expandRelativePathWithoutImporting ./. "."
 		) ("${builtins.getEnv "PWD"}/test") )
+
+		(eq "normalizes store paths" (
+			internal.expandRelativePath curl "."
+		) curl.outPath )
 
 		(eq "imports from git when path is not a store path" (
 			let result = ((internal.makeFetchers { path = ./storeSrc; })

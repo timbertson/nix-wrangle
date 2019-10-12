@@ -2,6 +2,8 @@
 with lib;
 let
 	_nixpkgs = pkgs;
+	infoLn = msg: ret: builtins.trace ("[wrangle] " + msg) ret;
+	debugLn = if builtins.getEnv "WRANGLE_DEBUG" == "true" then infoLn else (msg: ret: ret);
 	utils = rec {
 		# sub-tools implemented in their own nix files
 		importDrv = _nixpkgs.callPackage ./importDrv.nix {};
@@ -18,10 +20,15 @@ let
 		expandRelativePath = base: relative:
 			if base == null
 				then abort "relativePath only supported when using `inject` with a path"
-				# toString / toPath dance is carefully crafted to
-				#  - not import anything into the store, but also
-				#  - normalize paths (e.g. remove trailing /. )
-				else with builtins; toString (toPath ("${toString base}/${relative}"));
+				# toPath normalizes `/some-path/.` into simply `/some-path`
+				else with builtins; toPath "${base}/${relative}";
+
+		expandRelativePathWithoutImporting = base: relative:
+			with builtins;
+			# both toStrings are needed to prevent depending
+			# on the base / final paths (which would import
+			# them into the store)
+			toString (expandRelativePath (toString base) relative);
 
 		makeFetchers = { path }:
 			let withRelativePath = fn: args:
@@ -32,11 +39,16 @@ let
 					# short-circuit and just use that path
 					let
 						fromStore = isStorePath path;
-						fullPath = expandRelativePath path args.relativePath;
+						expandPath = if fromStore
+							then expandRelativePath
+							else expandRelativePathWithoutImporting;
+						fullPath = expandPath path args.relativePath;
 					in
 					if fromStore
-						then fullPath
-						else fn ({ path = fullPath; } // (filterAttrs (n: v: n != "relativePath") args))
+						then debugLn "Imported from store, resolved ${args.relativePath} to ${fullPath}" fullPath
+						else debugLn "Calling fetcher with resolved path ${fullPath} " (
+							fn ({ path = fullPath; } // (filterAttrs (n: v: n != "relativePath") args))
+						)
 				) else (
 					fn args
 				);
@@ -74,14 +86,15 @@ let
 				callWith = args:
 					# If attrs.nix == null, we return the source instead of a derivation
 					if nix == null
-						then builtins.trace "[wrangle] Providing ${name} (source-only, ${fetcher}) from ${src}" src
-						else builtins.trace "[wrangle] Importing ${name} (${fetcher}) from ${nix}" (overrideSrc {
+						then src
+						else overrideSrc {
 							inherit src version;
 							drv = callImpl args;
-						});
+						};
 				drv = callWith { inherit pkgs; path = nix; };
 			in
-			{ inherit name attrs src version nix drv; };
+			infoLn "Importing ${name} (${fetcher}) from ${if nix == null then src else nix}"
+				{ inherit name attrs src version nix drv; };
 
 		importsOfJson = settings: json:
 			# build a package scope with all imported packages present,
@@ -101,7 +114,7 @@ let
 		importJsonSrc = path:
 			let attrs = if isAttrs path
 				then path
-				else builtins.trace "[wrangle] Loading ${path}" (importJSON path);
+				else debugLn "Loading ${path}" (importJSON path);
 			in
 			assert attrs.wrangle.apiversion == 1; attrs;
 
@@ -183,11 +196,10 @@ let
 				selfSrc = imports.sources.self or null;
 			in
 			(if selfSrc == null then base else
-				builtins.trace "[wrangle] injecting src from `self` dependency" (
 				overrideSrc {
 					inherit (selfSrc) src version;
 					drv = base;
-				})
+				}
 			);
 	});
 in api

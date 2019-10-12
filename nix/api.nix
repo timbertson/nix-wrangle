@@ -75,7 +75,7 @@ let
 					# If attrs.nix == null, we return the source instead of a derivation
 					if nix == null
 						then builtins.trace "[wrangle] Providing ${name} (source-only, ${fetcher}) from ${src}" src
-						else builtins.trace "[wrangle] Importing ${name} (${fetcher}) from ${nix}" (assert true; overrideSrc {
+						else builtins.trace "[wrangle] Importing ${name} (${fetcher}) from ${nix}" (overrideSrc {
 							inherit src version;
 							drv = callImpl args;
 						});

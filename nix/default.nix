@@ -3,11 +3,6 @@
 (haskellPackages.callPackage ./wrangle.nix {}).overrideAttrs (o: rec {
 	src = ../.;
 	nativeBuildInputs = (o.nativeBuldInputs or []) ++ [makeWrapper];
-	preUnpack = ''
-		echo $src;
-		echo ${src};
-
-		'';
 	installPhase = o.installPhase + ''
 		mkdir -p "$out/share"
 		cp -r "$src/nix" "$out/share/nix"

@@ -375,7 +375,7 @@ parseCmdInit = subcommand "Initialize nix-wrangle" (
 cmdInit :: Maybe String -> IO ()
 cmdInit nixpkgs = do
   isGit <- Dir.doesFileExist ".git"
-  addMultiple OverwriteSource NoAutoInit (Right (selfSpec isGit : wrangleSpec : nixpkgsSpecs)) commonOpts
+  addMultiple OverwriteSource NoAutoInit (Right (wrangleSpec : (selfSpecs isGit ++ nixpkgsSpecs))) commonOpts
   updateDefaultNix defaultNixOptsDefault
   where
     commonOpts = CommonOpts { sources = Nothing }
@@ -400,17 +400,17 @@ cmdInit nixpkgs = do
       Source.packageAttrs = HMap.fromList [("nix", defaultDepNixPath)]
     })]
 
-    selfSpec isGit =
-      (PackageName "self", Source.PackageSpec {
-        Source.sourceSpec = if isGit then (Source.GitLocal Source.GitLocalSpec {
-          Source.glPath = localPath,
-          Source.glRef = Nothing
-        }) else (Source.Path localPath),
-        Source.fetchAttrs = HMap.empty,
-        Source.packageAttrs = HMap.empty
-      })
-      where
-        localPath = Source.RelativePath "."
+    selfSpecs isGit =
+      if isGit then [
+        (PackageName "self", Source.PackageSpec {
+          Source.sourceSpec = Source.GitLocal Source.GitLocalSpec {
+            Source.glPath = Source.RelativePath ".",
+            Source.glRef = Nothing
+          },
+          Source.fetchAttrs = HMap.empty,
+          Source.packageAttrs = HMap.empty
+        })
+      ] else []
 
 -------------------------------------------------------------------------------
 -- Add

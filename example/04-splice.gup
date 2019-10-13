@@ -1,6 +1,8 @@
 #!bash -eu
 . .doc_setup.sh
 
+[ -f nix/wrangle.json ] || gup 01-setup
+
 set -x
 comment_REM 'Splice the `nix-wrangle` source into nix/default.nix'
 nix-wrangle splice nix/default.nix --name nix-wrangle --output nix/public.nix

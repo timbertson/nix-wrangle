@@ -1,3 +1,6 @@
-result/
-nix/wrangle*.json
-nix/public.nix
+*
+!*.gup
+!nix/
+!nix/default.nix
+!.doc_setup.sh
+!default.nix

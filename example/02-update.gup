@@ -1,4 +1,7 @@
 #!bash -eu
+
+[ -f nix/wrangle.json ] || gup 01-setup
+
 . .doc_setup.sh
 
 # fake an old rev

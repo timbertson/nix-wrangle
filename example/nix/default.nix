@@ -1,12 +1,12 @@
 { stdenv, piep }:
 stdenv.mkDerivation {
   name="sample.txt";
-  src = null;
+  src = ../.;
   buildCommand = ''
-    cat > "$out" <<EOF
-      Sample derivation, built from:
-       - self: $src
-       - piep: ${piep}
-    EOF
+cat > "$out" <<EOF
+Sample derivation, built with:
+ - piep: ${piep}
+ - src: $src
+EOF
   '';
 }

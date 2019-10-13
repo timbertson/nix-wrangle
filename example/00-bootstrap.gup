@@ -1,0 +1,8 @@
+#!bash -eu
+. .doc_setup.sh
+
+rm -f nix/wrangle*.json
+
+set -x
+nix-build --expr 'import (builtins.fetchTarball "https://github.com/timbertson/nix-wrangle/archive/v1.tar.gz")'
+result/bin/nix-wrangle --help

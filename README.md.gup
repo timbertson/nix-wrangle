@@ -1,18 +1,21 @@
 #!bash -eu
+set -o pipefail
 # vim: set syntax=markdown:
 gup --always
-# set -x
+dest="$1"
 function include {
 	echo >&2 "Including $1"
 	gup -u "$1"
-	echo '```bash'
-	cat "$1"
-	echo '```'
+	echo '```bash' >> "$dest"
+	cat "$1" >> "$dest"
+	echo '```' >> "$dest"
 }
 
+echo '<!-- NOTE: README.md is generated from README.md.gup, do not manually edit -->' > "$1"
+
 set -x
-cat > "$1" <<EOF
-$(echo '<!-- NOTE: README.md is generated from README.md.gup, do not manually edit -->' 2>/dev/null)
+
+cat >> "$dest" <<"EOF"
 # nix-wrangle
 
 ## Purpose:
@@ -28,25 +31,25 @@ It works best with dependencies that include their own nix derivations, although
 
 ## Get it:
 
-\`\`\`
-nix-build --expr 'import (builtins.fetchTarball "https://github.com/timbertson/nix-wrangle/archive/v1.tar.gz")'
-\`\`\`
-
-That'll build the latest version of \`nix-wrangle\` into \`result/\`. You can then use it via \`./result/bin/nix-wrangle init\`.
+EOF
+include example/00-bootstrap
+cat >> "$dest" <<"EOF"
 
 ## Basic functionality:
 
 nix-wrangle maintains a set of sources, which are typically dependencies. The following example shows the basic setup:
 
-$(include example/01-setup)
+EOF
+include example/01-setup
+cat >> "$dest" <<"EOF"
 
-Note that the \`piep\` dependency is built (by using \`pkgs.callPackage\` on the nix path within the source), which gives you the actual derivation, not simply the source code. This is one important difference compared to [niv][].
+Note that the `piep` dependency is built (by using `pkgs.callPackage` on the nix path within the source), which gives you the actual derivation, not simply the source code. This is one important difference compared to [niv][].
 
 Sources are typically used for project dependencies, but there are three special sources:
 
- - 'self': (optional) used to override the toplevel derivation's 'src' attribute when building 'default.nix'
- - 'pkgs': (optional) used to pin the exact version of 'nixpkgs'
  - 'nix-wrangle': (added automatically) used for bootstrapping in 'default.nix'
+ - 'self': used to override the toplevel derivation's 'src' attribute when building 'default.nix'. Automatically added by `nix-wrangle init` as a `git-local` source if there's a `.git` directory present.
+ - 'pkgs': (optional) used to pin the exact version of 'nixpkgs'. Added automatically by `nix-wrangle init` if you pass `--pkgs nixpkgs-unstable` (or any other branch name from https://github.com/NixOS/nixpkgs-channels)
 
 # Features:
 
@@ -54,41 +57,47 @@ Nix-wrangle is purpose built to solve a range of specific use cases which come u
 
 ## Update from specification
 
-e.g. when using a git-based dependency, you can specify a branch instead of a specific commit. When you \`update\`, that branch will be re-resolved:
+e.g. when using a git-based dependency, you can specify a branch instead of a specific commit. When you `update`, that branch will be re-resolved:
 
-$(include example/02-update)
+EOF
+include example/02-update
+cat >> "$dest" <<"EOF"
 
-You can also make use of templating, e.g. for a URL dependency you can use the URL \`'http://example.com/libfoo/libfoo-<version>.tgz'\`. When updating, you can pass \`--version NEW_VERSION\` to update it.
+You can also make use of templating, e.g. for a URL dependency you can use the URL `'http://example.com/libfoo/libfoo-<version>.tgz'`. When updating, you can pass `--version NEW_VERSION` to update it.
 
 ## 'src' injection
 
-When building, a \`self\` dependency (if present) will be used to provide the \`src\` for the toplevel derivation. This lets you use nix-wrangle's various source types (e.g git-local, which isn't available as a \`nixpkgs\` builtin) and automatic generation (e.g. sha256 digests).
+When building, a `self` dependency (if present) will be used to provide the `src` for the toplevel derivation. This lets you use nix-wrangle's various source types (e.g git-local, which isn't available as a `nixpkgs` builtin) and automatic generation (e.g. sha256 digests).
 
-nix-wrangle will also inject the relevant \`src\` into each of your dependencies. Let's say you import commit \`x\` of the \`piep\` dependency, with a nix expression in it. It would be impossible for commit \`x\` of \`piep\` to refer to commit \`x\` as its \`src\` attribute. The best it could do is to refer to the parent of commit \`x\`, although it may often just refer to the most recently released version. Both of these would be counter-productive - you'd be importing the \`derivation\` at \`x\`, but building source code from _some other version_ out of your control. \`nix-wrangle\` automatically overrides the \`src\` of imported dependencies so that the version you _import_ is also the source code you _build_.
+nix-wrangle will also inject the relevant `src` into each of your dependencies. Let's say you import commit `x` of the `piep` dependency, with a nix expression in it. It would be impossible for commit `x` of `piep` to refer to commit `x` as its `src` attribute. The best it could do is to refer to the parent of commit `x`, although it may often just refer to the most recently released version. Both of these would be counter-productive - you'd be importing the `derivation` at `x`, but building source code from _some other version_ out of your control. `nix-wrangle` automatically overrides the `src` of imported dependencies so that the version you _import_ is also the source code you _build_.
 
 ## Local overrides
 
 When working on both a library and an application that uses it, it's common to want to try out working changes before publishing them. This is easy with local sources:
 
-$(include example/03-local-override)
+EOF
+include example/03-local-override
+cat >> "$dest" <<"EOF"
 
 This uses the local version of a dependency for building, but kept separate from the "public" version of your dependency specificaion.
 
-## Splicing \`src\` to produce a self-contained derivation
+## Splicing `src` to produce a self-contained derivation
 
-nix-wrangle was built so that your base derivation (\`nix/default.nix\`) can be idiomatic - it doesn't need to reference \`nix-wrangle\` at all, and its dependencies are injected as arguments, just like regular derivations in \`nixpkgs\`. The one way in which they aren't idiomatic is the \`src\` attribute, since in nixpkgs this typically refers to a remote repository or tarball.
+nix-wrangle was built so that your base derivation (`nix/default.nix`) can be idiomatic - it doesn't need to reference `nix-wrangle` at all, and its dependencies are injected as arguments, just like regular derivations in `nixpkgs`. The one way in which they aren't idiomatic is the `src` attribute, since in nixpkgs this typically refers to a remote repository or tarball.
 
-So there's also the \`splice\` command. This injects the current value of a fetched source (defaulting to \`self\`) into an existing nix file to create a self-contained derivation. This is perfect for promoting your in-tree derivation (with source provided by nix-wrangle) into a derivation suitable for inclusion in \`nixpkgs\`, where it includes its own \`src\` and all dependencies are provided by the caller.
+So there's also the `splice` command. This injects the current value of a fetched source (defaulting to `public`) into an existing nix file to create a self-contained derivation. This is perfect for promoting your in-tree derivation (with source provided by nix-wrangle) into a derivation suitable for inclusion in `nixpkgs`, where it includes its own `src` and all dependencies are provided by the caller.
 
-$(include example/04-splice)
+EOF
+include example/04-splice
+cat >> "$dest" <<"EOF"
 
 # Source types
 
- - \`url\`: any archive URL. May contain \`<version>\` which is resolved on \`update\`.
- - \`git\`: takes a \`url\` and \`rev\` (which can be a branch, tag or commit). \`rev\` is resolved to a concrete commit on initial add, and on \`update\`.
- - \`github\`: takes an \`owner\`, \`repo\` and \`rev\` (as for \`git\`)
- - \`git-local\`: takes a path (can be relative) and an optional \`rev\` (can be a branch, tag or \`HEAD\`). \`rev\` is resolved _at evaluation time_. If \`rev\` is not provided, you'll get the _working changes_ in the given workspace (but not any excluded or untracked files).
- - \`path\`: path (can be relative or absolute)
+ - `url`: any archive URL. May contain `<version>` which is resolved on `update`.
+ - `git`: takes a `url` and `rev` (which can be a branch, tag or commit). `rev` is resolved to a concrete commit on initial add, and on `update`.
+ - `github`: takes an `owner`, `repo` and `rev` (as for `git`)
+ - `git-local`: takes a path (can be relative) and an optional `rev` (can be a branch, tag or `HEAD`). `rev` is resolved _at evaluation time_. If `rev` is not provided, you'll get the _working changes_ in the given workspace (but not any excluded or untracked files).
+ - `path`: path (can be relative or absolute)
 
 ----
 
@@ -109,7 +118,7 @@ The main differences are:
 
  - nix-wrangle dependencies are derivations, not just source code.
  - nix-wrangle attempts to let you write idiomatic nix without explicitly referencing any files or functions provided by nix-wrangle.
- - nix-wrangle has a number of extra features not provided by niv: \`splice\`, \`self\` injection and local overlays.
+ - nix-wrangle has a number of extra features not provided by niv: `splice`, `self` injection and local overlays.
  - nix-wrangle is more featureful, but also more complex
 
 ### nix-flakes:

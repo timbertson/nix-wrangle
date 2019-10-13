@@ -1,7 +1,7 @@
 cabal-version: 2.0
 
 name:           nix-wrangle
-version:        0.0.0
+version:        1.0.0
 build-type:     Simple
 
 executable nix-wrangle

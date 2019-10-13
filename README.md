@@ -1,10 +1,24 @@
-
+<!-- NOTE: README.md is generated from README.md.gup, do not manually edit -->
 # nix-wrangle
 
 ## Purpose:
 
-Nix-wrangle aims to be a swiss-army knife for working with nix packages (or dependencies).
+Nix-wrangle aims to be a swiss-army knife for working with nix dependencies.
 It works best with dependencies that include their own nix derivations, although using it for fetching plain archives works too.
+
+### Goals:
+
+* Simple usage should be _idiomatic_ and portable, with no specific references to nix-wrangle's API
+* Keeping sources updated (and seeing their current state) should be trivial
+* Support local development across multiple related repositories
+
+## Get it:
+
+```
+nix-build --expr 'import (builtins.fetchTarball "https://github.com/timbertson/nix-wrangle/archive/v1.tar.gz")'
+```
+
+That'll build the latest version of `nix-wrangle` into `result/`. You can then use it via `./result/bin/nix-wrangle init`.
 
 ## Basic functionality:
 
@@ -75,7 +89,7 @@ $ cat result
    - piep: /nix/store/7fysz0cm3686f7hkhdk76kws4p8rswa2-python2.7-piep-0.8.1
 ```
 
-Note that the `piep` dependency is built (by using `pkgs.callPackage` on the nix path within the source), which gives you the actual derivation, not simply the source code. This is one important difference compared to [niv](https://github.com/nmattia/niv).
+Note that the `piep` dependency is built (by using `pkgs.callPackage` on the nix path within the source), which gives you the actual derivation, not simply the source code. This is one important difference compared to [niv][].
 
 Sources are typically used for project dependencies, but there are three special sources:
 
@@ -154,7 +168,7 @@ This uses the local version of a dependency for building, but kept separate from
 
 ## Splicing `src` to produce a self-contained derivation
 
-nix-wrangle was built so that your base derivation (`nix/default.nix`) can be idiomatic - it doesn't need to reference `nix-wrangle` at all, and its dependencies are injected as arguments, just like regular derivations in `nixpkgs`. The one way in which they aren't idiomatic is the `src` attribute. I typically set this to `null` to make it clear that it's externally managed.
+nix-wrangle was built so that your base derivation (`nix/default.nix`) can be idiomatic - it doesn't need to reference `nix-wrangle` at all, and its dependencies are injected as arguments, just like regular derivations in `nixpkgs`. The one way in which they aren't idiomatic is the `src` attribute, since in nixpkgs this typically refers to a remote repository or tarball.
 
 So there's also the `splice` command. This injects the current value of a fetched source (defaulting to `self`) into an existing nix file to create a self-contained derivation. This is perfect for promoting your in-tree derivation (with source provided by nix-wrangle) into a derivation suitable for inclusion in `nixpkgs`, where it includes its own `src` and all dependencies are provided by the caller.
 
@@ -190,22 +204,10 @@ stdenv.mkDerivation {
  - `url`: any archive URL. May contain `<version>` which is resolved on `update`.
  - `git`: takes a `url` and `rev` (which can be a branch, tag or commit). `rev` is resolved to a concrete commit on initial add, and on `update`.
  - `github`: takes an `owner`, `repo` and `rev` (as for `git`)
- - `git-local`: takes a path (can be relative) and a `rev` (can be a branch, tag, commit or `HEAD`). `rev` is resolved _at evaluation time_, and must be built with `--option build-use-chroot false`
- - `path`: path (can be relative) and `rev`
+ - `git-local`: takes a path (can be relative) and an optional `rev` (can be a branch, tag or `HEAD`). `rev` is resolved _at evaluation time_. If `rev` is not provided, you'll get the _working changes_ in the given workspace (but not any excluded or untracked files).
+ - `path`: path (can be relative or absolute)
 
 ----
-
-### 'build-use-chroot' caveat:
-
-The 'git-local' source type is "morally pure" - it uses a git commit SHA in the derivation, so (barring git commit collisions), it will be cached / rebuilt just like any other nix derivation. But it's implemented with some impurity -- the source derivation runs 'git-export' in your workspace.
-
-Unfortunately this requires that you pass '--option build-use-chroot false' when building these kinds of sources.
-
-(TODO how does this work for multi-user setup? It probably doesn't.)
-
-In order to not disable the chroot for an entire build, you can run 'nix-wrangle prebuild' to specifically prebuild all such sources with chroot disabled. Then the main build will work in a chroot, using these prebuilt sources.
-
-(TODO this probably doesn't work if you have pinned nixpkgs (different .drv))
 
 # Hacking
 
@@ -219,14 +221,17 @@ Alternatively, from within 'nix-shell -p haskellPackages.cabal-install' you can 
 
 ### niv:
 
-nix-wrangle was heavily inspired by [niv](https://github.com/nmattia/niv) (the command line tool was even based off the niv source code).
+nix-wrangle was heavily inspired by [niv][] (the command line tool was even based off the niv source code).
 The main differences are:
 
  - nix-wrangle dependencies are derivations, not just source code.
  - nix-wrangle attempts to let you write idiomatic nix without explicitly referencing any files or functions provided by nix-wrangle.
  - nix-wrangle has a number of extra features not provided by niv: `splice`, `self` injection and local overlays.
+ - nix-wrangle is more featureful, but also more complex
 
 ### nix-flakes:
 
-nix-wrangle (like niv) is similar in spirit to [nix flakes](https://gist.github.com/edolstra/40da6e3a4d4ee8fd019395365e0772e7), but there's no actual implementation of flakes yet. My hope is that any standard solution would be able to support nix-wrangle style workflows.
+nix-wrangle (like [niv][]) is similar in spirit to [nix flakes](https://gist.github.com/edolstra/40da6e3a4d4ee8fd019395365e0772e7), but there's no actual implementation of flakes yet. My hope is that any standard solution would be able to support nix-wrangle style workflows.
+
+[niv]: https://github.com/nmattia/niv
 

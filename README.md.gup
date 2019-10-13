@@ -10,14 +10,29 @@ function include {
 	echo '```'
 }
 
+set -x
 cat > "$1" <<EOF
-$(true > /dev/null)
+$(echo '<!-- NOTE: README.md is generated from README.md.gup, do not manually edit -->' 2>/dev/null)
 # nix-wrangle
 
 ## Purpose:
 
-Nix-wrangle aims to be a swiss-army knife for working with nix packages (or dependencies).
+Nix-wrangle aims to be a swiss-army knife for working with nix dependencies.
 It works best with dependencies that include their own nix derivations, although using it for fetching plain archives works too.
+
+### Goals:
+
+* Simple usage should be _idiomatic_ and portable, with no specific references to nix-wrangle's API
+* Keeping sources updated (and seeing their current state) should be trivial
+* Support local development across multiple related repositories
+
+## Get it:
+
+\`\`\`
+nix-build --expr 'import (builtins.fetchTarball "https://github.com/timbertson/nix-wrangle/archive/v1.tar.gz")'
+\`\`\`
+
+That'll build the latest version of \`nix-wrangle\` into \`result/\`. You can then use it via \`./result/bin/nix-wrangle init\`.
 
 ## Basic functionality:
 
@@ -25,7 +40,7 @@ nix-wrangle maintains a set of sources, which are typically dependencies. The fo
 
 $(include example/01-setup)
 
-Note that the \`piep\` dependency is built (by using \`pkgs.callPackage\` on the nix path within the source), which gives you the actual derivation, not simply the source code. This is one important difference compared to [niv](https://github.com/nmattia/niv).
+Note that the \`piep\` dependency is built (by using \`pkgs.callPackage\` on the nix path within the source), which gives you the actual derivation, not simply the source code. This is one important difference compared to [niv][].
 
 Sources are typically used for project dependencies, but there are three special sources:
 
@@ -72,7 +87,7 @@ $(include example/04-splice)
  - \`url\`: any archive URL. May contain \`<version>\` which is resolved on \`update\`.
  - \`git\`: takes a \`url\` and \`rev\` (which can be a branch, tag or commit). \`rev\` is resolved to a concrete commit on initial add, and on \`update\`.
  - \`github\`: takes an \`owner\`, \`repo\` and \`rev\` (as for \`git\`)
- - \`git-local\`: takes a path (can be relative) and an optional \`rev\` (can be a branch, tag or \`HEAD\`). \`rev\` is resolved _at evaluation time_. If `rev` is not provided, you'll get the _working changes_ in the given workspace (but not any excluded or untracked files).
+ - \`git-local\`: takes a path (can be relative) and an optional \`rev\` (can be a branch, tag or \`HEAD\`). \`rev\` is resolved _at evaluation time_. If \`rev\` is not provided, you'll get the _working changes_ in the given workspace (but not any excluded or untracked files).
  - \`path\`: path (can be relative or absolute)
 
 ----
@@ -89,15 +104,18 @@ Alternatively, from within 'nix-shell -p haskellPackages.cabal-install' you can 
 
 ### niv:
 
-nix-wrangle was heavily inspired by [niv](https://github.com/nmattia/niv) (the command line tool was even based off the niv source code).
+nix-wrangle was heavily inspired by [niv][] (the command line tool was even based off the niv source code).
 The main differences are:
 
  - nix-wrangle dependencies are derivations, not just source code.
  - nix-wrangle attempts to let you write idiomatic nix without explicitly referencing any files or functions provided by nix-wrangle.
  - nix-wrangle has a number of extra features not provided by niv: \`splice\`, \`self\` injection and local overlays.
+ - nix-wrangle is more featureful, but also more complex
 
 ### nix-flakes:
 
-nix-wrangle (like niv) is similar in spirit to [nix flakes](https://gist.github.com/edolstra/40da6e3a4d4ee8fd019395365e0772e7), but there's no actual implementation of flakes yet. My hope is that any standard solution would be able to support nix-wrangle style workflows.
+nix-wrangle (like [niv][]) is similar in spirit to [nix flakes](https://gist.github.com/edolstra/40da6e3a4d4ee8fd019395365e0772e7), but there's no actual implementation of flakes yet. My hope is that any standard solution would be able to support nix-wrangle style workflows.
+
+[niv]: https://github.com/nmattia/niv
 
 EOF

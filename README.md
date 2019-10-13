@@ -45,7 +45,7 @@ nix-wrangle maintains a set of sources, which are typically dependencies. The fo
 
 ```bash
 
-# Here's our derivation, nix/default.nix. It expects a \`piep\` argument, and uses a relative path for `src`:
+# Here's our derivation, nix/default.nix. It expects a `piep` argument, and uses a relative path for `src`:
 $ cat nix/default.nix
 { stdenv, piep }:
 stdenv.mkDerivation {
@@ -64,8 +64,8 @@ EOF
 $ nix-wrangle init
 Adding "nix-wrangle" // PackageSpec {sourceSpec = Github (GithubSpec {ghOwner = "timbertson", ghRepo = "nix-wrangle", ghRef = Template "v1"}), fetchAttrs = fromList [], packageAttrs = fromList [("nix","nix")]}
 fetching Github (GithubSpec {ghOwner = "timbertson", ghRepo = "nix-wrangle", ghRef = Template "v1"})
-Resolved nix-wrangle -> v1 -> 2066dd8a382ee974cdbfd109f37a9be1d04f8481
- - sha256:13gfwk6lx8yn0gfxyfrfkqiz1yzicg6qq5219l5fb517n3da5chq
+Resolved nix-wrangle -> v1 -> 79287edfaa7bd065888e26eba429d2e2710c2f51
+ - sha256:0fk4bd4lkkmxr2z75vwsj5b2f7xlg8ybjmd51aandpz3minz03f5
 Writing: nix/wrangle.json
 Writing: default.nix
 
@@ -80,15 +80,15 @@ Writing: nix/wrangle.json
 $ nix-build
 trace: [wrangle] Importing piep (github) from /nix/store/ax68rn4b8dc4lrcfqq4rhx2fcwdr807a-source/nix/
 these derivations will be built:
-  /nix/store/cwb0s7mgz3mdnv716vdilkhba12s7dpw-sample.txt.drv
-building '/nix/store/cwb0s7mgz3mdnv716vdilkhba12s7dpw-sample.txt.drv'...
-/nix/store/xgwk9aw9q58xdvfnsyy95rd1bnv6i68r-sample.txt
+  /nix/store/kqdazszslqwyks5ckl26c4y3ya7jhkfk-sample.txt.drv
+building '/nix/store/kqdazszslqwyks5ckl26c4y3ya7jhkfk-sample.txt.drv'...
+/nix/store/y8kwj1phi0m2byynr9dw741yyvn32vk1-sample.txt
 
 # And here's the result, with injected source and `piep` dependency:
 $ cat result
 Sample derivation, built with:
  - piep: /nix/store/6w23yj4hyabxzwcgnl0d3xjr261ywrvr-python2.7-piep-0.8.1
- - src: /nix/store/dsb8l9v2a9l6cxwv9kkbwngb3niak4fy-example
+ - src: /nix/store/hiazl86hdzmlnjzkcxs6hn1p7hlkx9fi-example
 ```
 
 Note that the `piep` dependency is built (by using `pkgs.callPackage` on the nix path within the source), which gives you the actual derivation, not simply the source code. This is one important difference compared to [niv][].

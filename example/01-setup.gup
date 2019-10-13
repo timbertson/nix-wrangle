@@ -3,7 +3,7 @@ rm -f nix/wrangle*.json
 . .doc_setup.sh
 
 set -x
-comment_REM 'Here'\''s our derivation, nix/default.nix. It expects a \`piep\` argument, and uses a relative path for `src`:'
+comment_REM 'Here'\''s our derivation, nix/default.nix. It expects a `piep` argument, and uses a relative path for `src`:'
 cat nix/default.nix
 comment_REM 'Initialize nix/wrangle.json (pass `--pkgs nixos-unstable` to pin nixpkgs version):'
 nix-wrangle init

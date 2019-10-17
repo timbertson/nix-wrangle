@@ -192,6 +192,9 @@ let
 				# override a dependency. Note that `provided` defaults pkgs & nix-wrangle to `null`
 				extantProvided = filterAttrs (n: v: v != null) _provided;
 				mergedPkgs = (internal.importScope pkgs imports.sources) // extantProvided;
+				nixFunction = if lib.isFunction nixPath
+					then nixPath
+					else import nixPath;
 				base = mergedPkgs.callPackage nixPath _args;
 				selfSrc = imports.sources.self or null;
 			in
@@ -199,6 +202,9 @@ let
 				overrideSrc {
 					inherit (selfSrc) src version;
 					drv = base;
+					# Skip warning if function explicitly accepts `self`, it
+					# probably knows what it's doing.
+					warn = ! ((lib.functionArgs nixFunction) ? "self");
 				}
 			);
 	});

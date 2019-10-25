@@ -128,8 +128,8 @@ let
 		(eq "imports from git when path is not a store path" (
 			let result = ((internal.makeFetchers { path = ./storeSrc; })
 				.git-local { relativePath = "../.."; ref="HEAD"; }); in
-			result
-		) (builtins.fetchGit { url = ../.; ref="HEAD"; }) )
+			[(lib.isDerivation result) result.path]
+		) [true (builtins.fetchGit { url = ../.; ref="HEAD"; })] )
 
 		(eq "uses store path directly path is a store path" (
 			# "${x}" copies path x into the store

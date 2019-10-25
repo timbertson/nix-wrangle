@@ -93,7 +93,7 @@ let
 						};
 				drv = callWith { inherit pkgs; path = nix; };
 			in
-			infoLn "Importing ${name} (${fetcher}) from ${if nix == null then src else nix}"
+			infoLn "${if nix == null then "Providing source" else "Impprting derivation"} ${name} (${fetcher}) from ${if nix == null then src else nix}"
 				{ inherit name attrs src version nix drv; };
 
 		importsOfJson = settings: json:

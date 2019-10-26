@@ -34,15 +34,8 @@
 		commitDrv = builtins.fetchGit { url = path; rev = commit; };
 		refDrv = builtins.fetchGit { url = path; rev = (resolveRef ref); inherit ref; };
 		workspaceDrv = builtins.fetchGit { url = path; };
-		ensureRealDerivation = base: if lib.isDerivation base then base else stdenv.mkDerivation {
-			name = "src";
-			passthru = { path = base; };
-			buildCommand = ''
-				ln -sfn ${base} $out
-			'';
-		};
 	in
-	ensureRealDerivation (lib.findFirst (x: x.condition == true) { drv = commitRequired; } [
+	(lib.findFirst (x: x.condition == true) { drv = commitRequired; } [
 		{ condition = commit != null && ref == null && !workingChanges; drv = commitDrv; }
 		{ condition = commit == null && ref != null && !workingChanges; drv = refDrv; }
 		{ condition = commit == null && ref == null && workingChanges;  drv = workspaceDrv; }

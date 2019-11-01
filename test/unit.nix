@@ -1,16 +1,31 @@
 with import <nixpkgs> {};
 with builtins;
 with lib;
-let api = (callPackage ../nix/api.nix {}); internal = api.internal; in
 let
+	api = (callPackage ../nix/api.nix {
+		nix-wrangle = stdenv.mkDerivation { name = "fake-nix-wrangle"; buildCommand = "false"; };
+	});
+	internal = api.internal;
+
 	wrangleHeader = { apiversion = 1; };
 	addHeader = j: j // { wrangle = wrangleHeader; };
-	eq = msg: a: b:
-		let result = [
-			"${msg}: ${toJSON a} != ${toJSON b}" (a == b)
-		]; in
-		if builtins.getEnv "TRACE" == "1" then
-			lib.warn "Executing test case: ${msg}" result else result;
+	eq = name: a: b:
+		[ name (a == b) ("${toJSON a} != ${toJSON b}") ];
+
+	testFailure = test:
+		let
+			result = if elemAt test 1 then [] else [ "${name}${suffix}" ];
+			name = elemAt test 0;
+			# third element is an optional message
+			suffix = if length test == 2 then "" else ":\n  ${elemAt test 2}";
+			testOnly = builtins.getEnv "TEST_ONLY";
+			runTest = if testOnly == "" then true else name == testOnly;
+			logTest =
+				if builtins.getEnv "TRACE" == "1" then
+				lib.warn "Executing test case: ${elemAt test 0}"
+				else result: result;
+		in
+		if runTest then logTest result else [];
 
 	versionSrc = import samplePackage/versionSrc.nix;
 
@@ -45,7 +60,7 @@ let
 		inherit pkgs;
 	};
 
-	checks = [
+	tests = [
 		["implPath is path" (isString (makeImport "name" versionSrc).nix)]
 
 		((result: eq "returns source if nix is unset" result.src result.drv)
@@ -185,9 +200,20 @@ let
 			}
 		).src)
 
+		(eq "inject provides sources individually via `self`" (
+			let imports = internal.importsOfJson {path = null;} {
+				version = versionSrc // {
+					nix = ./return-self-1.nix;
+				};
+				curl = {
+					type = "_passthru";
+					fetch = curl.src;
+					nix = ./return-self-2.nix;
+				};
+			}; in [imports.version.drv imports.curl.drv])
+			[ (makeImport "name" versionSrc).src curl.src ])
+
 	];
-	failures = concatMap (test:
-		if elemAt test 1 then [] else [(elemAt test 0)]
-	) checks;
+	failures = concatMap testFailure tests;
 in
 if (length failures) == 0 then "OK" else abort (lib.concatStringsSep "\n" failures)

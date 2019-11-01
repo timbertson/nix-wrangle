@@ -6,10 +6,18 @@ let
 	debugLn = if builtins.getEnv "WRANGLE_DEBUG" == "true" then infoLn else (msg: ret: ret);
 	utils = rec {
 		# sub-tools implemented in their own nix files
-		importDrv = _nixpkgs.callPackage ./importDrv.nix {};
 		exportLocalGit = _nixpkgs.callPackage ./exportLocalGit.nix { };
-		overrideSrc = _nixpkgs.callPackage ./overrideSrc.nix { inherit importDrv; };
+		overrideSrc = _nixpkgs.callPackage ./overrideSrc.nix { };
 	};
+
+	ensureFunction = nixPath: if isFunction nixPath
+		then nixPath
+		else (
+			let imported = import nixPath; in
+			if isFunction imported
+				then imported
+				else abort "Imported expression ${nixPath} is not a function"
+		);
 
 	augmentGitLocalArgs = { path, commit ? null, ref ? null }@args:
 		if commit == null && ref == null then (args // { workingChanges = true; }) else args;
@@ -61,8 +69,28 @@ let
 			_passthru = arg: arg; # used in tests
 		};
 
-		importScope = pkgs: attrs:
-			lib.makeScope pkgs.newScope (self: pkgs // mapAttrs (name: node: node.drv) attrs);
+		importScope = pkgs: attrs: let
+			sources = mapAttrs (name: node: node.src) attrs;
+			nodes = attrValues attrs;
+			derivations = mapAttrs (name: node: node.drv) attrs;
+			# This is a bit weird: for each invocation of callPackage, if it's a known
+			# wrangle it gets `self` injected as appropriate.
+			newScope = scope: let call = pkgs.newScope scope; in
+				pkg: args: let
+					pkgFn = ensureFunction pkg;
+					node = findFirst (node: node.nix == pkg) null nodes;
+					selfNeeded = (functionArgs pkgFn) ? "self"  && (! args ? "self");
+					overrideSelf = if node == null
+					then debugLn
+						"Importing a function accepting `self`, but it does not match a known wrangle path"
+						args
+					else debugLn
+						"Injecting node-specific `self`"
+						(args // { self = node.src; });
+					callArgs = if selfNeeded then overrideSelf else args;
+				in call pkgFn callArgs;
+		in
+		lib.makeScope newScope (self: pkgs // derivations);
 
 		makeImport = { settings, pkgs }: name: attrs:
 			let
@@ -75,8 +103,8 @@ let
 				;
 				nixAttr = attrs.nix or null;
 				nix = if nixAttr == null then null else (
-					if src == null then nixAttr # used in tests only
-					else "${src}/${nixAttr}"
+					if isString nixAttr then "${src}/${nixAttr}"
+					else nixAttr # used only in tests
 				);
 				version = attrs.version or (fetchArgs.ref or null);
 
@@ -91,9 +119,10 @@ let
 							inherit src version;
 							drv = callImpl args;
 						};
-				drv = callWith { inherit pkgs; path = nix; };
+				nixDesc = if (isString nix || builtins.isPath nix) then nix else src;
+				drv = debugLn "calling ${nixDesc}" (callWith { inherit pkgs; path = nix; });
 			in
-			infoLn "${if nix == null then "Providing source" else "Importing derivation"} ${name} (${fetcher}) from ${if nix == null then src else nix}"
+			infoLn "${if nix == null then "Providing source" else "Importing derivation"} ${name} (${fetcher}) from ${nixDesc}"
 				{ inherit name attrs src version nix drv; };
 
 		importsOfJson = settings: json:
@@ -192,9 +221,7 @@ let
 				# override a dependency. Note that `provided` defaults pkgs & nix-wrangle to `null`
 				extantProvided = filterAttrs (n: v: v != null) _provided;
 				mergedPkgs = (internal.importScope pkgs imports.sources) // extantProvided;
-				nixFunction = if lib.isFunction nixPath
-					then nixPath
-					else import nixPath;
+				nixFunction = ensureFunction nixPath;
 				base = mergedPkgs.callPackage nixPath _args;
 				selfSrc = imports.sources.self or null;
 			in

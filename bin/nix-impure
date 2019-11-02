@@ -1,8 +1,0 @@
-#!/usr/bin/env python3
-# Run an "impure" nix derivation created with
-# nixImpure
-# and print its content-addressed
-# result.
-import os, sys, subprocess
-args = sys.argv[1:]
-os.execvp('nix-shell', ['nix-shell'] + args + ['--run', 'true'])

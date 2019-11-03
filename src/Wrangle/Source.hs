@@ -408,15 +408,17 @@ stringOfLazy :: L.ByteString -> String
 stringOfLazy = TL.unpack . TLE.decodeUtf8
 
 encodeFile :: (ToJSON a) => FilePath -> a -> IO ()
-encodeFile path json = writeFileLazyBytestring path (encodePretty json)
+encodeFile path json = writeFileLazyBytestring path (encodePretty json <> "\n")
 
 writeFileLazyBytestring :: FilePath -> L.ByteString -> IO ()
-writeFileLazyBytestring path contents =
-  writeFileContents' L.writeFile path (contents <> "\n")
+writeFileLazyBytestring path contents = do
+  debugLn $ "Writing contents: " <> (show contents)
+  writeFileContents' L.writeFile path contents
 
 writeFileText :: FilePath -> T.Text -> IO ()
-writeFileText path text =
-  writeFileContents' (\path -> B.writeFile path . E.encodeUtf8) path (text <> "\n")
+writeFileText path text = do
+  debugLn $ "Writing contents: " <> (show text)
+  writeFileContents' (\path -> B.writeFile path . E.encodeUtf8) path text
 
 writeFileContents' :: (FilePath -> a -> IO ()) -> FilePath -> a -> IO ()
 writeFileContents' writer path contents = do

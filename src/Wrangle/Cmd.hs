@@ -696,8 +696,7 @@ updateDefaultNix (DefaultNixOpts { force }) = do
     contents = T.unlines [
       markerText,
       "# It can be regenerated with `nix-wrangle default-nix`",
-      defaultNixContents,
-      ""] -- trailing newline
+      defaultNixContents ]
 
     shouldWriteFile :: IO Bool
     shouldWriteFile = do
@@ -709,7 +708,7 @@ updateDefaultNix (DefaultNixOpts { force }) = do
 
 defaultDepNixPath = "default.nix"
 
-defaultNixContents = [QQ.s|
+defaultNixContents = T.strip [QQ.s|
 let
   systemNixpkgs = import <nixpkgs> {};
   fallback = val: dfl: if val == null then dfl else val;

@@ -411,10 +411,12 @@ encodeFile :: (ToJSON a) => FilePath -> a -> IO ()
 encodeFile path json = writeFileLazyBytestring path (encodePretty json)
 
 writeFileLazyBytestring :: FilePath -> L.ByteString -> IO ()
-writeFileLazyBytestring = writeFileContents' L.writeFile
+writeFileLazyBytestring path contents =
+  writeFileContents' L.writeFile path (contents <> "\n")
 
 writeFileText :: FilePath -> T.Text -> IO ()
-writeFileText path text = writeFileContents' (\path -> B.writeFile path . E.encodeUtf8) path text
+writeFileText path text =
+  writeFileContents' (\path -> B.writeFile path . E.encodeUtf8) path (text <> "\n")
 
 writeFileContents' :: (FilePath -> a -> IO ()) -> FilePath -> a -> IO ()
 writeFileContents' writer path contents = do

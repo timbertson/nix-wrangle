@@ -49,8 +49,8 @@ orTry (Right x) _ = (Right x)
 orTry (Left _) alt = alt
 
 debugLn :: String -> IO ()
-debugLn = case unsafePerformIO (Env.lookupEnv "DEBUG") of
-  (Just "true") -> putStrLn . ("[debug]: " <>)
+debugLn = case unsafePerformIO (Env.lookupEnv "WRANGLE_DEBUG") of
+  (Just "1") -> putStrLn . ("[debug]: " <>)
   (Just _) -> noop
   Nothing -> noop
   where

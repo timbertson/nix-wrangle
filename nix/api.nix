@@ -3,7 +3,7 @@ with lib;
 let
 	_nixpkgs = pkgs;
 	infoLn = msg: ret: builtins.trace ("[wrangle] " + msg) ret;
-	debugLn = if builtins.getEnv "WRANGLE_DEBUG" == "true" then infoLn else (msg: ret: ret);
+	debugLn = if builtins.getEnv "WRANGLE_DEBUG" == "1" then infoLn else (msg: ret: ret);
 	utils = rec {
 		# sub-tools implemented in their own nix files
 		exportLocalGit = _nixpkgs.callPackage ./exportLocalGit.nix { };

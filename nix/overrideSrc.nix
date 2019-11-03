@@ -1,11 +1,13 @@
 { lib }:
 { src, drv, version ? null, warn ? true }:
 let
-	override = attrs: if attrs ? overrideAttrs then attrs.overrideAttrs else lib.overrideDerivation attrs;
-	overrides = {inherit src; } // (if version == null then {} else { inherit version; });
+	optionalVersion = if version == null then {} else { inherit version; };
+	override = if drv ? overrideAttrs
+		then drv.overrideAttrs
+		else lib.overrideDerivation drv;
 in
 	if lib.isDerivation drv
-		then override drv (_: overrides)
+		then override (super: { inherit src; } // optionalVersion)
 		else (
 			if warn then lib.warn "overrideSrc: ${builtins.typeOf drv} is not a derivation, ignoring src ${builtins.toString src}" drv
 			else drv

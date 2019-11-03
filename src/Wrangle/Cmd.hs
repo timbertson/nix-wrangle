@@ -374,7 +374,8 @@ parseCmdInit = subcommand "Initialize nix-wrangle" (
 
 cmdInit :: Maybe String -> IO ()
 cmdInit nixpkgs = do
-  isGit <- Dir.doesFileExist ".git"
+  isGit <- Dir.doesPathExist ".git"
+  debugLn $ "isGit ? " <> (show isGit)
   addMultiple OverwriteSource NoAutoInit (Right (wrangleSpec : (selfSpecs isGit ++ nixpkgsSpecs))) commonOpts
   updateDefaultNix defaultNixOptsDefault
   where

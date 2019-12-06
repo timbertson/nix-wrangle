@@ -2,9 +2,7 @@ with import <nixpkgs> {};
 with builtins;
 with lib;
 let
-	api = (callPackage ../nix/api.nix {
-		nix-wrangle = stdenv.mkDerivation { name = "fake-nix-wrangle"; buildCommand = "false"; };
-	});
+	api = (callPackage ../nix/api.nix {});
 	internal = api.internal;
 
 	wrangleHeader = { apiversion = 1; };
@@ -21,7 +19,7 @@ let
 			testOnly = builtins.getEnv "TEST_ONLY";
 			runTest = if testOnly == "" then true else name == testOnly;
 			logTest =
-				if builtins.getEnv "TRACE" == "1" then
+				if builtins.getEnv "WRANGLE_DEBUG" == "1" then
 				lib.warn "Executing test case: ${elemAt test 0}"
 				else result: result;
 		in
@@ -200,7 +198,16 @@ let
 			}
 		).src)
 
-		(eq "inject provides sources individually via `self`" (
+		(eq "inject uses provides packages in callPackage scope" (
+			api.inject {
+				sources = [];
+				nix = ({ foo, self }: foo);
+				provided = { foo = "hello from FOO!"; };
+			})
+			("hello from FOO!")
+		)
+
+		(eq "makeImport provides sources individually via `self`" (
 			let imports = internal.importsOfJson {path = null;} {
 				version = versionSrc // {
 					nix = ./return-self-1.nix;

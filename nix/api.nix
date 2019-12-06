@@ -220,9 +220,9 @@ let
 				# local sources. This is used in recursive wrangle, to
 				# override a dependency. Note that `provided` defaults pkgs & nix-wrangle to `null`
 				extantProvided = filterAttrs (n: v: v != null) _provided;
-				mergedPkgs = (internal.importScope pkgs imports.sources) // extantProvided;
+				callWithProvided = pkgs.newScope ((internal.importScope pkgs imports.sources) // extantProvided);
 				nixFunction = ensureFunction nixPath;
-				base = mergedPkgs.callPackage nixPath _args;
+				base = callWithProvided nixPath _args;
 				selfSrc = imports.sources.self or null;
 			in
 			(if selfSrc == null then base else

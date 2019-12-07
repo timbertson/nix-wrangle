@@ -30,10 +30,11 @@
 		in resolve refPath;
 
 		commitRequired = abort "exactly one of commit, ref or workingChanges required";
+		urlPath = /. + path;
 
-		commitDrv = builtins.fetchGit { url = path; rev = commit; };
-		refDrv = builtins.fetchGit { url = path; rev = (resolveRef ref); inherit ref; };
-		workspaceDrv = builtins.fetchGit { url = path; };
+		commitDrv = builtins.fetchGit { url = urlPath; rev = commit; };
+		refDrv = builtins.fetchGit { url = urlPath; rev = (resolveRef ref); inherit ref; };
+		workspaceDrv = builtins.fetchGit { url = urlPath; };
 	in
 	(lib.findFirst (x: x.condition == true) { drv = commitRequired; } [
 		{ condition = commit != null && ref == null && !workingChanges; drv = commitDrv; }

@@ -33,7 +33,7 @@ Available commands:
   add                      Add a source
   rm                       Remove one or more sources
   update                   Update one or more sources
-  splice                   Splice current `self` source into a .nix document
+  splice                   Splice current `public` source into a .nix document
   show                     Show source details
   ls                       list sources
   default-nix              Generate default.nix

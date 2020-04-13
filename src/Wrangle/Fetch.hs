@@ -114,11 +114,22 @@ resolveGitRef remote refName = do
   debugLn $ "Resolving git reference: "<>showRef
   refs <- getRefs
   sequence_ $ map (debugLn . show) refs
-  tap logResult $ liftEither $ toRight missing $ firstMatch refs
+  tap logResult $ liftEither $ toRight missing $ firstMatch (refs <> identityRef)
   where
     showRef = remote<>"#"<>refName
     missing = AppError $ "Couldn't resolve ref "<>showRef
     logResult result = debugLn $ "Resolved to: "<> show result
+
+    identityRef =
+      if isValidSha
+      then [ResolvedRef {
+          revision = GitRevision refName,
+          ref = refName
+        }]
+      else []
+      where
+        shaRegex = "^[0-9a-fA-F]{40}$" :: String
+        isValidSha = refName =~ shaRegex :: Bool
 
     getRefs :: IO [ResolvedRef]
     getRefs = do

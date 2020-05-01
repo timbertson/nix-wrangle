@@ -3,9 +3,9 @@ let
   systemNixpkgs = import <nixpkgs> {};
   fallback = val: dfl: if val == null then dfl else val;
 in
-{ pkgs ? null }@provided:
+{ pkgs ? null, enableSplice ? true }@provided:
 let
   _pkgs = fallback pkgs systemNixpkgs;
-  _wrangle = _pkgs.callPackage ./nix {};
+  _wrangle = _pkgs.callPackage ./nix { enableSplice = false; };
 in
-(_wrangle.api { pkgs = _pkgs; }).inject { inherit provided; path = ./.; }
+(_wrangle.api { pkgs = _pkgs; }).inject { provided = provided // { inherit enableSplice; }; path = ./.; }

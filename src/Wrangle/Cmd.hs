@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase #-}
@@ -32,7 +33,9 @@ import qualified Data.ByteString as B
 import qualified Wrangle.Fetch as Fetch
 import qualified Wrangle.Source as Source
 import qualified System.Directory as Dir
+#ifdef ENABLE_SPLICE
 import qualified Wrangle.Splice as Splice
+#endif
 import qualified Options.Applicative as Opts
 import qualified Options.Applicative.Help.Pretty as Doc
 import qualified System.FilePath.Posix as PosixPath
@@ -52,7 +55,9 @@ parseCommand = Opts.subparser (
   Opts.command "add" parseCmdAdd <>
   Opts.command "rm" parseCmdRm <>
   Opts.command "update" parseCmdUpdate <>
+#ifdef ENABLE_SPLICE
   Opts.command "splice" parseCmdSplice <>
+#endif
   Opts.command "show" parseCmdShow <>
   Opts.command "ls" parseCmdLs <>
   Opts.command "default-nix" parseCmdDefaultNix
@@ -569,6 +574,7 @@ alterPackagesNamed packageNamesOpt opts updateSingle =
 loadSource :: Source.SourceFile -> IO (Source.SourceFile, Source.Packages)
 loadSource f = (,) f <$> Source.loadSourceFile f
 
+#ifdef ENABLE_SPLICE
 -------------------------------------------------------------------------------
 -- Splice
 -------------------------------------------------------------------------------
@@ -664,6 +670,8 @@ cmdSplice (SpliceOpts { spliceName, spliceAttrs, spliceInput, spliceOutput, spli
         infoLn $ "Splicing anonymous source from attributes: " <> show spliceAttrs
         self <- liftEither $ snd <$> processAdd Nothing Nothing spliceAttrs
         Fetch.prefetch (PackageName "self") self
+#endif
+-- ^ ENABLE_SPLICE
 
 -------------------------------------------------------------------------------
 -- default-nix

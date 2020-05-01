@@ -4,17 +4,30 @@ name:           nix-wrangle
 version:        1.0.0
 build-type:     Simple
 
+flag splice
+  description: enable `splice` subcommand (depends on hnix)
+  default: True
+
 executable nix-wrangle
   main-is: Main.hs
   other-modules:
     Wrangle.Cmd
     Wrangle.Source
     Wrangle.Util
-    Wrangle.Splice
     Wrangle.Fetch
   hs-source-dirs:
     ./src
   ghc-options: -Wall -Werror -fno-warn-name-shadowing -fno-warn-missing-signatures
+  if flag(splice)
+    cpp-options: -DENABLE_SPLICE
+    build-depends:
+        hnix ^>= 0.6.1
+      , data-fix
+      , megaparsec
+      , prettyprinter
+    other-modules:
+      Wrangle.Splice
+
   build-depends:
     -- basics
     base
@@ -37,12 +50,6 @@ executable nix-wrangle
     , mtl
     , optparse-applicative
 
-    -- Splice
-    , hnix ^>= 0.6.1
-    , data-fix
-    , megaparsec
-    , prettyprinter
-
     -- Fetch
     , regex-tdfa
     , process
@@ -50,3 +57,4 @@ executable nix-wrangle
 
 
   default-language: Haskell2010
+  other-extensions: CPP

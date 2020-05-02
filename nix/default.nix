@@ -1,4 +1,4 @@
-{ stdenv, lib, git, callPackage, makeWrapper, fetchFromGitHub, haskellPackages, enableSplice }:
+{ stdenv, lib, git, callPackage, makeWrapper, fetchFromGitHub, haskellPackages, enableSplice ? true }:
 # ./wrangle.nix is the vanilla cabal2nix output, so we wrap it here:
 let
 	splice =

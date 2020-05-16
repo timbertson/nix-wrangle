@@ -1,5 +1,5 @@
 { pkgs ? import <nixpkgs> {}}:
-(pkgs.callPackage ./default.nix {}).env.overrideAttrs (o: {
+(pkgs.callPackage ./default.nix { args.enableSplice = false; }).env.overrideAttrs (o: {
 	nativeBuildInputs = o.nativeBuildInputs ++ [
 		pkgs.haskellPackages.cabal-install
 		pkgs.haskellPackages.ghcid

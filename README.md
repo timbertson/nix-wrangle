@@ -228,7 +228,7 @@ The main differences are:
 
 ### nix-flakes:
 
-nix-wrangle (like [niv][]) is similar in spirit to [nix flakes](https://gist.github.com/edolstra/40da6e3a4d4ee8fd019395365e0772e7), but there's no actual implementation of flakes yet. My hope is that any standard solution would be able to support nix-wrangle style workflows.
+nix-wrangle (like [niv][]) is similar in spirit to [nix flakes](https://github.com/tweag/rfcs/blob/flakes/rfcs/0049-flakes.md), but the implementation is still experimental. My hope is that any standard solution would be able to support nix-wrangle style workflows.
 
 [niv]: https://github.com/nmattia/niv
 

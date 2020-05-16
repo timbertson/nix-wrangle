@@ -157,6 +157,8 @@ This uses the local version of a dependency for building, but kept separate from
 
 ## Splicing `src` to produce a self-contained derivation
 
+**Note:** this requires you pass `--arg args '{ enableSplice = true; }'` to nix-build; the `hnix` dependency required for this is not included by default. If importing the nix expression some other way, include `args = { enableSplice = true; }` in the call arguments.
+
 nix-wrangle was built so that your base derivation (`nix/default.nix`) can be idiomatic - it doesn't need to reference `nix-wrangle` at all, and its dependencies are injected as arguments, just like regular derivations in `nixpkgs`. The one way in which they aren't idiomatic is the `src` attribute, since in nixpkgs this typically refers to a remote repository or tarball.
 
 So there's also the `splice` command. This injects the current value of a fetched source (defaulting to `public`) into an existing nix file to create a self-contained derivation. This is perfect for promoting your in-tree derivation (with source provided by nix-wrangle) into a derivation suitable for inclusion in `nixpkgs`, where it includes its own `src` and all dependencies are provided by the caller.

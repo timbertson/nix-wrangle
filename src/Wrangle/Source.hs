@@ -43,16 +43,16 @@ import qualified System.Directory as Dir
 
 latestApiVersion = 1
 
-data FetchAttr = S String | B Bool deriving Eq
-instance Show FetchAttr where
+data StringOrBool = S String | B Bool deriving Eq
+instance Show StringOrBool where
   show (S x) = show x
   show (B x) = show x
 
-type FetchKV = (String, FetchAttr)
+type Kv = (String, StringOrBool)
 
 type StringMap = HMap.HashMap String String
 
-type FetchMap = HMap.HashMap String FetchAttr
+type KvMap = HMap.HashMap String StringOrBool
 
 fetchKeyJSON = "fetch" :: T.Text
 typeKeyJSON = "type" :: T.Text
@@ -66,11 +66,10 @@ wrangleHeaderJSON :: Aeson.Value
 wrangleHeaderJSON =
   Object $ HMap.singleton apiversionKeyJSON (toJSON latestApiVersion)
 
--- TODO rename, obviously...
-class ToStringPairs t where
-  toStringPairs :: t -> [FetchKV]
-  toStringMap :: t -> FetchMap
-  toStringMap = HMap.fromList . toStringPairs
+class ToKvPairs t where
+  toKvPairs :: t -> [Kv]
+  toKvMap :: t -> KvMap
+  toKvMap = HMap.fromList . toKvPairs
 
 class AsString t where
   asString :: t -> String
@@ -151,20 +150,20 @@ data GithubSpec = GithubSpec {
   ghCommon :: GitCommon
 } deriving (Show, Eq)
 
-instance ToStringPairs GithubSpec where
-  toStringPairs GithubSpec { ghOwner, ghRepo, ghRef } =
+instance ToKvPairs GithubSpec where
+  toKvPairs GithubSpec { ghOwner, ghRepo, ghRef } =
     [
       ("owner", S ghOwner),
       ("repo", S ghRepo),
       ("ref", S $ asString ghRef)
     ]
     
-instance FromJSON FetchAttr where
+instance FromJSON StringOrBool where
   parseJSON (Bool v) = pure (B v)
   parseJSON (String v) = pure (S (T.unpack v))
   parseJSON v = typeMismatch "String/Boolean" v
   
-instance ToJSON FetchAttr where
+instance ToJSON StringOrBool where
   toJSON (B v) = toJSON v
   toJSON (S v) = toJSON v
 
@@ -187,8 +186,8 @@ data UrlSpec = UrlSpec {
   url :: Template
 } deriving (Show, Eq)
 
-instance ToStringPairs UrlSpec where
-  toStringPairs UrlSpec { urlType = _urlType, url } =
+instance ToKvPairs UrlSpec where
+  toKvPairs UrlSpec { urlType = _urlType, url } =
     [ ("url", S $ asString url) ]
 
 data GitSpec = GitSpec {
@@ -197,8 +196,8 @@ data GitSpec = GitSpec {
   gitCommon :: GitCommon
 } deriving (Show, Eq)
 
-instance ToStringPairs GitSpec where
-  toStringPairs GitSpec { gitUrl, gitRef } =
+instance ToKvPairs GitSpec where
+  toKvPairs GitSpec { gitUrl, gitRef } =
     [
       ("url", S gitUrl),
       ("ref", S $ asString gitRef)
@@ -209,9 +208,9 @@ data LocalPath
   | RelativePath FilePath
    deriving (Show, Eq)
 
-instance ToStringPairs LocalPath where
-  toStringPairs (FullPath p) = [("path", S p)]
-  toStringPairs (RelativePath p) = [("relativePath", S p)]
+instance ToKvPairs LocalPath where
+  toKvPairs (FullPath p) = [("path", S p)]
+  toKvPairs (RelativePath p) = [("relativePath", S p)]
 
 data GitLocalSpec = GitLocalSpec {
   glPath :: LocalPath,
@@ -219,9 +218,9 @@ data GitLocalSpec = GitLocalSpec {
   glCommon :: GitCommon
 } deriving (Show, Eq)
 
-instance ToStringPairs GitLocalSpec where
-  toStringPairs GitLocalSpec { glPath, glRef } =
-    (toStringPairs glPath) <> optList (refAttr <$> glRef) where
+instance ToKvPairs GitLocalSpec where
+  toKvPairs GitLocalSpec { glPath, glRef } =
+    (toKvPairs glPath) <> optList (refAttr <$> glRef) where
       refAttr ref = ("ref", S $ asString ref)
 
 data SourceSpec
@@ -232,12 +231,12 @@ data SourceSpec
   | Path LocalPath
   deriving (Show, Eq)
 
-instance ToStringPairs SourceSpec where
-  toStringPairs (Github f) = toStringPairs f
-  toStringPairs (Url f) = toStringPairs f
-  toStringPairs (Git f) = toStringPairs f
-  toStringPairs (GitLocal f) = toStringPairs f
-  toStringPairs (Path f) = toStringPairs f
+instance ToKvPairs SourceSpec where
+  toKvPairs (Github f) = toKvPairs f
+  toKvPairs (Url f) = toKvPairs f
+  toKvPairs (Git f) = toKvPairs f
+  toKvPairs (GitLocal f) = toKvPairs f
+  toKvPairs (Path f) = toKvPairs f
 
 parseBoolFromString :: String -> Parser Bool
 parseBoolFromString "true" = pure True
@@ -287,7 +286,7 @@ parseSourceSpecObject fetcher attrs = parseFetcher fetcher >>= parseSpec
 
 data PackageSpec = PackageSpec {
   sourceSpec :: SourceSpec,
-  fetchAttrs :: FetchMap,
+  fetchAttrs :: KvMap,
   packageAttrs :: StringMap
 } deriving (Show, Eq)
 
@@ -311,7 +310,7 @@ instance ToJSON PackageSpec where
     toJSON
       . HMap.insert (T.unpack typeKeyJSON) (toJSON . fetcherNameWrangle . fetchType $ sourceSpec)
       . HMap.insert (T.unpack fetchKeyJSON) (toJSON fetchAttrs)
-      $ (HMap.map toJSON (HMap.map S packageAttrs <> toStringMap sourceSpec))
+      $ (HMap.map toJSON (HMap.map S packageAttrs <> toKvMap sourceSpec))
 
 newtype Packages = Packages
   { unPackages :: HMap.HashMap PackageName PackageSpec }

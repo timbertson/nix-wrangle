@@ -37,19 +37,19 @@ prefetch name pkg = do
   src = sourceSpec pkg
   render = renderTemplate (packageAttrs pkg)
 
-  updateDigestIf :: Bool -> [String] -> [FetchKV] -> IO [FetchKV]
+  updateDigestIf :: Bool -> [String] -> [Kv] -> IO [Kv]
   updateDigestIf cond path attrs = case existing digestKey of
     (Just (S digest)) | not cond -> return $ (digestKey, S digest) : attrs
     _ -> addDigest path attrs
 
-  addDigest :: [String] -> [FetchKV] -> IO [FetchKV]
+  addDigest :: [String] -> [Kv] -> IO [Kv]
   addDigest path attrs = prefix <$> (log $ prefetchSha256 (fetchType src) attrs) where
     prefix d = (digestKey, S (asString d)) : attrs
     log = tap (\d -> do
       infoLn $ "Resolved " <> (intercalate " -> " (asString name : path))
       infoLn $ " - "<>digestKey<>":" <> asString d)
 
-  gitCommonAttrs :: GitCommon -> [FetchKV]
+  gitCommonAttrs :: GitCommon -> [Kv]
   gitCommonAttrs common = if fetchSubmodules common
     then [(fetchSubmodulesKeyJSON, B True)]
     else []
@@ -60,13 +60,13 @@ prefetch name pkg = do
     commit <- revision <$> resolveGitRef repo ref
     return (ref, commit)
       
-  addGitDigest :: String -> GitRevision -> GitCommon -> [FetchKV] -> IO [FetchKV]
+  addGitDigest :: String -> GitRevision -> GitCommon -> [Kv] -> IO [Kv]
   addGitDigest ref commit common attrs =
     updateDigestIf (Just (S $ asString commit) /= existing "rev")
       [ref, asString commit]
       (attrs <> gitCommonAttrs common)
 
-  resolveAttrs :: SourceSpec -> IO [FetchKV]
+  resolveAttrs :: SourceSpec -> IO [Kv]
   resolveAttrs (Github (GithubSpec { ghOwner, ghRepo, ghRef, ghCommon })) = do
     (ref, commit) <- resolveGit repo ghRef
     addGitDigest ref commit ghCommon [
@@ -86,12 +86,12 @@ prefetch name pkg = do
   -- *Local require no prefetching:
   resolveAttrs (GitLocal (GitLocalSpec { glPath, glRef, glCommon })) = do
     ref <- liftEither $ sequence $ render <$> glRef
-    return $ optList (refAttr <$> ref) <> toStringPairs glPath <> gitCommonAttrs glCommon
+    return $ optList (refAttr <$> ref) <> toKvPairs glPath <> gitCommonAttrs glCommon
     where
       refAttr ref = ("ref", S ref)
 
   resolveAttrs (Path p) = do
-    return $ toStringPairs p
+    return $ toKvPairs p
 
 data ResolvedRef = ResolvedRef {
   revision :: GitRevision,
@@ -167,7 +167,7 @@ resolveGitRef remote refName = do
 shaLen = 52
 dummySHA256 = concat $ replicate shaLen "0"
 
-nixBuildCommand :: NixApiContext -> FetchType -> [FetchKV] -> NonEmpty String
+nixBuildCommand :: NixApiContext -> FetchType -> [Kv] -> NonEmpty String
 nixBuildCommand (NixApiContext { apiNix, projectRoot }) fetchType attrs
   = exe :| args
   where
@@ -205,7 +205,7 @@ globalApiContext = do
 -- This supports arbitrary prefetching without worrying about nix-prefetch-*.
 -- It's slightly inefficient since it results in two downloads of a file,
 -- but it's very reliable regardless of fetch method.
-prefetchSha256 :: FetchType -> [FetchKV] -> IO Sha256
+prefetchSha256 :: FetchType -> [Kv] -> IO Sha256
 prefetchSha256 fetchType attrs = do
   apiContext <- globalApiContext
   let cmd = nixBuildCommand apiContext fetchType $ ("sha256", S dummySHA256) : attrs

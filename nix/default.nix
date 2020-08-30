@@ -8,7 +8,7 @@ let
 		} else {
 			flag = "-splice";
 			filterDeps = drv: if drv == null then false else
-				builtins.trace "filtercheck: ${if drv == null then "NULL" else drv.pname}" (drv.pname != "hnix"); # could exclude more, but hnix is the big one
+				builtins.trace "filtercheck: ${if drv == null then "NULL" else "${drv.pname} v${drv.version or "???"}"}" (drv.pname != "hnix"); # could exclude more, but hnix is the big one
 		}; in
 		builtins.trace "splice flag: ${ret.flag}" ret;
 

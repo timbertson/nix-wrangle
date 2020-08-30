@@ -114,24 +114,31 @@ parseNames = NonEmpty.nonEmpty <$> many parseName
 (|>) a fn = fn a
 
 lookupAttr :: String -> StringMap -> (Maybe String, StringMap)
-lookupAttr key map = (HMap.lookup key map, HMap.delete key map)
+lookupAttr key map = (HMap.lookup key map, map)
+
+consumeAttr :: String -> StringMap -> (Maybe String, StringMap)
+consumeAttr key map = (HMap.lookup key map, HMap.delete key map)
 
 attrRequired :: String -> String
 attrRequired key = "--"<> key <> " required"
 
-consumeAttr :: String -> StringMap -> (Either String String, StringMap)
-consumeAttr key map = require $ lookupAttr key map where
+consumeRequiredAttr :: String -> StringMap -> (Either String String, StringMap)
+consumeRequiredAttr key map = require $ consumeAttr key map where
   -- this error message is a little presumptuous...
   require (value, map) = (toRight (attrRequired key) value, map)
 
 type StringMapState a = StateT StringMap (Either String) a
-optionalAttrT :: String -> StringMapState (Maybe String)
-optionalAttrT key = state $ lookupAttr key
+
+consumeOptionalAttrT :: String -> StringMapState (Maybe String)
+consumeOptionalAttrT key = state $ consumeAttr key
+
+lookupOptionalAttrT :: String -> StringMapState (Maybe String)
+lookupOptionalAttrT key = state $ lookupAttr key
 
 consumeAttrT :: String -> StringMapState String
 consumeAttrT key = StateT consume where
   consume :: StringMap -> Either String (String, StringMap)
-  consume = reshape . consumeAttr key
+  consume = reshape . consumeRequiredAttr key
   reshape (result, map) = (\result -> (result, map)) <$> result
 
 defaultGitRef = "master"
@@ -167,11 +174,11 @@ processAdd nameOpt source attrs = mapLeft AppError $ build nameOpt source attrs
     packageSpec sourceSpec = state $ \attrs -> (Source.PackageSpec {
       Source.sourceSpec,
       Source.packageAttrs = attrs,
-      Source.fetchAttrs = Source.emptyAttrs
+      Source.fetchAttrs = HMap.empty
     }, HMap.empty)
 
     buildPathOpt :: StringMapState (Maybe Source.LocalPath)
-    buildPathOpt = fmap pathOfString <$> optionalAttrT "path" where
+    buildPathOpt = fmap pathOfString <$> consumeOptionalAttrT "path" where
 
     buildPath :: Maybe String -> StringMapState Source.LocalPath
     buildPath source =
@@ -188,30 +195,42 @@ processAdd nameOpt source attrs = mapLeft AppError $ build nameOpt source attrs
       path <- buildPath source
       packageSpec (Source.Path path)
 
+    buildGitCommon :: StringMapState Source.GitCommon
+    buildGitCommon = do
+      fetchSubmodulesStr <- lookupOptionalAttrT Source.fetchSubmodulesKeyJSON
+      fetchSubmodules <- lift $ case fetchSubmodulesStr of
+        Just "true" -> Right True
+        Just "false" -> Right False
+        Nothing -> Right False
+        Just other -> Left ("fetchSubmodules: expected Bool, got: " ++ (other))
+      return $ Source.GitCommon { Source.fetchSubmodules }
+
     buildGit :: Maybe String -> StringMapState Source.PackageSpec
     buildGit source = do
-      urlArg <- optionalAttrT "url"
-      gitRef <- optionalAttrT "ref"
+      urlArg <- consumeOptionalAttrT "url"
+      gitRef <- consumeOptionalAttrT "ref"
       gitUrl <- lift $ toRight
         ("--url or source required")
         (urlArg <|> source)
+      gitCommon <- buildGitCommon
       packageSpec $ Source.Git $ Source.GitSpec {
-        Source.gitUrl,
+        Source.gitUrl, Source.gitCommon,
         Source.gitRef = Source.Template (gitRef `orElse` defaultGitRef)
       }
 
     buildGitLocal :: Maybe String -> StringMapState Source.PackageSpec
     buildGitLocal source = do
       glPath <- buildPath source
-      ref <- optionalAttrT "ref"
+      ref <- consumeOptionalAttrT "ref"
+      glCommon <- buildGitCommon
       packageSpec $ Source.GitLocal $ Source.GitLocalSpec {
-        Source.glPath,
+        Source.glPath, Source.glCommon,
         Source.glRef = Source.Template <$> ref
       }
 
     buildUrl :: Source.UrlFetchType -> Maybe String -> StringMapState Source.PackageSpec
     buildUrl urlType source = do
-      urlAttr <- optionalAttrT "url"
+      urlAttr <- consumeOptionalAttrT "url"
       url <- lift $ toRight "--url or souce required" (urlAttr <|> source)
       packageSpec $ Source.Url Source.UrlSpec {
         Source.urlType = urlType,
@@ -226,10 +245,12 @@ processAdd nameOpt source attrs = mapLeft AppError $ build nameOpt source attrs
     buildGithub :: Maybe String -> Maybe PackageName -> StringMapState (Maybe PackageName, Source.PackageSpec)
     buildGithub source name = do
       (name, ghOwner, ghRepo) <- identity
-      ref <- optionalAttrT "ref"
+      ref <- consumeOptionalAttrT "ref"
+      ghCommon <- buildGitCommon
       withName (Just name) $ packageSpec $ Source.Github Source.GithubSpec {
         Source.ghOwner,
         Source.ghRepo,
+        Source.ghCommon,
         Source.ghRef = Source.Template . fromMaybe "master" $ ref
       }
       where
@@ -237,8 +258,8 @@ processAdd nameOpt source attrs = mapLeft AppError $ build nameOpt source attrs
 
         identity :: StringMapState (PackageName, String, String)
         identity = do
-          owner <- optionalAttrT "owner"
-          repo <- optionalAttrT "repo"
+          owner <- consumeOptionalAttrT "owner"
+          repo <- consumeOptionalAttrT "repo"
           lift $ buildIdentity owner repo
 
         buildIdentity :: Maybe String -> Maybe String -> Either String (PackageName, String, String)
@@ -322,6 +343,7 @@ parsePackageAttrs mode = build <$> many parseAttribute where
     allShortcuts = ("nix", "all") : sourceShortcuts
     sourceShortcuts = [
       ("ref", "github / git / git-local"),
+      ("fetchSubmodules", "github / git / git-local"),
       ("owner", "github"),
       ("repo", "github"),
       ("url", "url / file / git"),
@@ -409,6 +431,7 @@ cmdInit nixpkgs = do
       Source.sourceSpec = Source.Github Source.GithubSpec {
         Source.ghOwner = "timbertson",
         Source.ghRepo = "nix-wrangle",
+        Source.ghCommon = Source.defaultGitCommon,
         Source.ghRef = Source.Template "v1"
       },
       Source.fetchAttrs = HMap.empty,
@@ -420,6 +443,7 @@ cmdInit nixpkgs = do
       Source.sourceSpec = Source.Github Source.GithubSpec {
         Source.ghOwner = "NixOS",
         Source.ghRepo = "nixpkgs-channels",
+        Source.ghCommon = Source.defaultGitCommon,
         Source.ghRef = Source.Template channel
       },
       Source.fetchAttrs = HMap.empty,
@@ -431,7 +455,8 @@ cmdInit nixpkgs = do
         (PackageName "self", Source.PackageSpec {
           Source.sourceSpec = Source.GitLocal Source.GitLocalSpec {
             Source.glPath = Source.RelativePath ".",
-            Source.glRef = Nothing
+            Source.glRef = Nothing,
+            Source.glCommon = Source.defaultGitCommon
           },
           Source.fetchAttrs = HMap.empty,
           Source.packageAttrs = HMap.empty

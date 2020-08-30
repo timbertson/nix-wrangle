@@ -43,7 +43,16 @@ import qualified System.Directory as Dir
 
 latestApiVersion = 1
 
+data FetchAttr = S String | B Bool deriving Eq
+instance Show FetchAttr where
+  show (S x) = show x
+  show (B x) = show x
+
+type FetchKV = (String, FetchAttr)
+
 type StringMap = HMap.HashMap String String
+
+type FetchMap = HMap.HashMap String FetchAttr
 
 fetchKeyJSON = "fetch" :: T.Text
 typeKeyJSON = "type" :: T.Text
@@ -51,13 +60,16 @@ versionKeyJSON = "version" :: T.Text
 sourcesKeyJSON = "sources" :: T.Text
 wrangleKeyJSON = "wrangle" :: T.Text
 apiversionKeyJSON = "apiversion" :: T.Text
+fetchSubmodulesKeyJSON = "fetchSubmodules" :: String
+
 wrangleHeaderJSON :: Aeson.Value
 wrangleHeaderJSON =
   Object $ HMap.singleton apiversionKeyJSON (toJSON latestApiVersion)
 
+-- TODO rename, obviously...
 class ToStringPairs t where
-  toStringPairs :: t -> [(String, String)]
-  toStringMap :: t -> StringMap
+  toStringPairs :: t -> [FetchKV]
+  toStringMap :: t -> FetchMap
   toStringMap = HMap.fromList . toStringPairs
 
 class AsString t where
@@ -78,8 +90,14 @@ newtype Sha256 = Sha256 String deriving (Show, Eq, FromJSON, ToJSON)
 instance AsString Sha256 where
   asString (Sha256 s) = s
 
-data FetchType =
-  FetchGithub
+data GitCommon = GitCommon {
+  fetchSubmodules :: Bool
+} deriving (Show, Eq)
+
+defaultGitCommon = GitCommon { fetchSubmodules = False }
+
+data FetchType
+  = FetchGithub
   | FetchGit
   | FetchUrl UrlFetchType
   | FetchGitLocal
@@ -129,16 +147,26 @@ fetcherNameWrangle f = case f of
 data GithubSpec = GithubSpec {
   ghOwner :: String,
   ghRepo :: String,
-  ghRef :: Template
+  ghRef :: Template,
+  ghCommon :: GitCommon
 } deriving (Show, Eq)
 
 instance ToStringPairs GithubSpec where
   toStringPairs GithubSpec { ghOwner, ghRepo, ghRef } =
     [
-      ("owner", ghOwner),
-      ("repo", ghRepo),
-      ("ref", asString ghRef)
+      ("owner", S ghOwner),
+      ("repo", S ghRepo),
+      ("ref", S $ asString ghRef)
     ]
+    
+instance FromJSON FetchAttr where
+  parseJSON (Bool v) = pure (B v)
+  parseJSON (String v) = pure (S (T.unpack v))
+  parseJSON v = typeMismatch "String/Boolean" v
+  
+instance ToJSON FetchAttr where
+  toJSON (B v) = toJSON v
+  toJSON (S v) = toJSON v
 
 data UrlFetchType = FetchArchive | FetchFile deriving (Show, Eq)
 
@@ -161,18 +189,19 @@ data UrlSpec = UrlSpec {
 
 instance ToStringPairs UrlSpec where
   toStringPairs UrlSpec { urlType = _urlType, url } =
-    [ ("url", asString url) ]
+    [ ("url", S $ asString url) ]
 
 data GitSpec = GitSpec {
   gitUrl :: String,
-  gitRef :: Template
+  gitRef :: Template,
+  gitCommon :: GitCommon
 } deriving (Show, Eq)
 
 instance ToStringPairs GitSpec where
   toStringPairs GitSpec { gitUrl, gitRef } =
     [
-      ("url", gitUrl),
-      ("ref", asString gitRef)
+      ("url", S gitUrl),
+      ("ref", S $ asString gitRef)
     ]
 
 data LocalPath
@@ -181,18 +210,19 @@ data LocalPath
    deriving (Show, Eq)
 
 instance ToStringPairs LocalPath where
-  toStringPairs (FullPath p) = [("path", p)]
-  toStringPairs (RelativePath p) = [("relativePath", p)]
+  toStringPairs (FullPath p) = [("path", S p)]
+  toStringPairs (RelativePath p) = [("relativePath", S p)]
 
 data GitLocalSpec = GitLocalSpec {
   glPath :: LocalPath,
-  glRef :: Maybe Template
+  glRef :: Maybe Template,
+  glCommon :: GitCommon
 } deriving (Show, Eq)
 
 instance ToStringPairs GitLocalSpec where
   toStringPairs GitLocalSpec { glPath, glRef } =
     (toStringPairs glPath) <> optList (refAttr <$> glRef) where
-      refAttr ref = ("ref", asString ref)
+      refAttr ref = ("ref", S $ asString ref)
 
 data SourceSpec
   = Github GithubSpec
@@ -209,69 +239,79 @@ instance ToStringPairs SourceSpec where
   toStringPairs (GitLocal f) = toStringPairs f
   toStringPairs (Path f) = toStringPairs f
 
+parseBoolFromString :: String -> Parser Bool
+parseBoolFromString "true" = pure True
+parseBoolFromString "false" = pure False
+parseBoolFromString other = fail $ "Not a boolean: " <> other
+
 -- TODO return (SourceSpec, remainingAttrs)?
 parseSourceSpecObject :: Value -> Object -> Parser SourceSpec
 parseSourceSpecObject fetcher attrs = parseFetcher fetcher >>= parseSpec
   where
     parseFetcher :: Value -> Parser FetchType
     parseFetcher json = parseJSON json >>= bifoldMap invalid pure . parseFetchType
+
     parseSpec :: FetchType -> Parser SourceSpec
     parseSpec fetcher = case fetcher of
       FetchGithub ->
-        build <$> owner <*> repo <*> refRequired where
-          build ghOwner  ghRepo  ghRef = Github $ GithubSpec {
-                ghOwner, ghRepo, ghRef }
-      FetchGit -> build <$> url <*> refRequired where
-        build gitUrl gitRef = Git $ GitSpec { gitUrl, gitRef }
+        build <$> owner <*> repo <*> refRequired <*> gitCommon where
+          build ghOwner  ghRepo  ghRef  ghCommon = Github $ GithubSpec {
+                ghOwner, ghRepo, ghRef, ghCommon }
+      FetchGit -> build <$> url <*> refRequired <*> gitCommon where
+        build gitUrl gitRef gitCommon = Git $ GitSpec { gitUrl, gitRef, gitCommon }
       FetchGitLocal ->
-        build <$> path <*> refOpt where
-          build glPath glRef = GitLocal $ GitLocalSpec { glPath, glRef }
+        build <$> path <*> refOpt <*> gitCommon where
+          build glPath glRef glCommon = GitLocal $ GitLocalSpec { glPath, glRef, glCommon }
       FetchPath -> Path <$> path
       (FetchUrl t) -> buildUrl t <$> url
+
+    gitCommon :: Parser GitCommon
+    gitCommon = build <$> fetchSubmodulesOpt where
+      build fetchSubmodules = GitCommon { fetchSubmodules }
+
     owner = attrs .: "owner"
     repo = attrs .: "repo"
     url = attrs .: "url"
     path = (FullPath <$> attrs .: "path") <|> (RelativePath <$> attrs .: "relativePath")
     refRequired :: Parser Template = attrs .: "ref"
     refOpt :: Parser (Maybe Template) = attrs .:? "ref"
+
+    fetchSubmodulesOpt :: Parser Bool
+    fetchSubmodulesOpt = do
+      (strOpt :: Maybe String) <- attrs .:? (T.pack fetchSubmodulesKeyJSON)
+      (boolOpt :: Maybe Bool) <- traverse parseBoolFromString strOpt
+      return $ maybe (fetchSubmodules defaultGitCommon) id boolOpt
+
     buildUrl urlType url = Url $ UrlSpec { urlType, url = Template url }
     invalid v = fail $ "Unable to parse SourceSpec from: " <> (encodePrettyString v)
 
-stringMapOfJson :: Aeson.Object -> Parser (HMap.HashMap String String)
-stringMapOfJson args = HMap.fromList <$> (mapM convertArg $ HMap.toList args)
-  where
-    convertArg :: (T.Text, Aeson.Value) -> Parser (String, String)
-    convertArg (k, v) =
-      (\v -> (T.unpack k, T.unpack v)) <$> parseJSON v
-  
 data PackageSpec = PackageSpec {
   sourceSpec :: SourceSpec,
-  fetchAttrs :: StringMap,
+  fetchAttrs :: FetchMap,
   packageAttrs :: StringMap
 } deriving (Show, Eq)
 
 instance FromJSON PackageSpec where
-  parseJSON = withObject "PackageSpec" $ \attrs -> do
+  parseJSON = withObject "PackageSpec" (\attrs -> do
     (fetchJSON, attrs) <- attrs `extract` fetchKeyJSON
     (fetcher, attrs) <- attrs `extract` typeKeyJSON
-    (fetchAttrs :: StringMap) <- parseJSON fetchJSON
-    build
-      <$> (parseSourceSpecObject fetcher attrs)
-      <*> (pure fetchAttrs) <*> stringMapOfJson attrs
-    where
-      extract obj key = pairWithout key obj <$> obj .: key
-      -- extractMaybe obj key = pairWithout key obj <$> obj .:? key
-      pairWithout key obj v = (v, HMap.delete key obj)
-      build sourceSpec fetchAttrs packageAttrs = PackageSpec {
-        sourceSpec, fetchAttrs, packageAttrs
-      }
+    let fetchAttrs = (parseJSON fetchJSON)
+    let packageAttrs = (parseJSON (Object attrs))
+    build <$> (parseSourceSpecObject fetcher attrs)
+      <*> fetchAttrs <*> packageAttrs
+    ) where
+    extract obj key = pairWithout key obj <$> obj .: key
+    pairWithout key obj v = (v, HMap.delete key obj)
+    build sourceSpec fetchAttrs packageAttrs = PackageSpec {
+      sourceSpec, fetchAttrs, packageAttrs
+    }
 
 instance ToJSON PackageSpec where
   toJSON PackageSpec { sourceSpec, fetchAttrs, packageAttrs } =
     toJSON
       . HMap.insert (T.unpack typeKeyJSON) (toJSON . fetcherNameWrangle . fetchType $ sourceSpec)
       . HMap.insert (T.unpack fetchKeyJSON) (toJSON fetchAttrs)
-      $ (HMap.map toJSON (packageAttrs <> HMap.fromList (toStringPairs sourceSpec)))
+      $ (HMap.map toJSON (HMap.map S packageAttrs <> toStringMap sourceSpec))
 
 newtype Packages = Packages
   { unPackages :: HMap.HashMap PackageName PackageSpec }
@@ -284,9 +324,6 @@ add s name spec = Packages $ HMap.insert name spec $ unPackages s
 
 remove :: Packages -> PackageName -> Packages
 remove s name = Packages $ HMap.delete name $ unPackages s
-
-emptyAttrs :: StringMap
-emptyAttrs = HMap.empty
 
 instance FromJSON Packages where
   parseJSON = withObject "document" $ \obj ->

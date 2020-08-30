@@ -37,17 +37,22 @@ prefetch name pkg = do
   src = sourceSpec pkg
   render = renderTemplate (packageAttrs pkg)
 
-  updateDigestIf :: Bool -> [String] -> [(String,String)] -> IO [(String,String)]
+  updateDigestIf :: Bool -> [String] -> [FetchKV] -> IO [FetchKV]
   updateDigestIf cond path attrs = case existing digestKey of
-    (Just digest) | not cond -> return $ (digestKey, digest) : attrs
+    (Just (S digest)) | not cond -> return $ (digestKey, S digest) : attrs
     _ -> addDigest path attrs
 
-  addDigest :: [String] -> [(String,String)] -> IO [(String,String)]
+  addDigest :: [String] -> [FetchKV] -> IO [FetchKV]
   addDigest path attrs = prefix <$> (log $ prefetchSha256 (fetchType src) attrs) where
-    prefix d = (digestKey, asString d) : attrs
+    prefix d = (digestKey, S (asString d)) : attrs
     log = tap (\d -> do
       infoLn $ "Resolved " <> (intercalate " -> " (asString name : path))
       infoLn $ " - "<>digestKey<>":" <> asString d)
+
+  gitCommonAttrs :: GitCommon -> [FetchKV]
+  gitCommonAttrs common = if fetchSubmodules common
+    then [(fetchSubmodulesKeyJSON, B True)]
+    else []
 
   resolveGit :: String -> Template -> IO (String, GitRevision)
   resolveGit repo ref = do
@@ -55,33 +60,35 @@ prefetch name pkg = do
     commit <- revision <$> resolveGitRef repo ref
     return (ref, commit)
       
-  addGitDigest :: String -> GitRevision -> [(String,String)] -> IO [(String,String)]
-  addGitDigest ref commit =
-    updateDigestIf (Just (asString commit) /= existing "rev") [ref, asString commit]
+  addGitDigest :: String -> GitRevision -> GitCommon -> [FetchKV] -> IO [FetchKV]
+  addGitDigest ref commit common attrs =
+    updateDigestIf (Just (S $ asString commit) /= existing "rev")
+      [ref, asString commit]
+      (attrs <> gitCommonAttrs common)
 
-  resolveAttrs :: SourceSpec -> IO [(String,String)]
-  resolveAttrs (Github (GithubSpec { ghOwner, ghRepo, ghRef })) = do
+  resolveAttrs :: SourceSpec -> IO [FetchKV]
+  resolveAttrs (Github (GithubSpec { ghOwner, ghRepo, ghRef, ghCommon })) = do
     (ref, commit) <- resolveGit repo ghRef
-    addGitDigest ref commit [
-      ("owner", ghOwner),
-      ("repo", ghRepo),
-      ("rev", asString commit)]
+    addGitDigest ref commit ghCommon [
+      ("owner", S ghOwner),
+      ("repo", S ghRepo),
+      ("rev", S $ asString commit)]
     where repo = "https://github.com/"<>ghOwner<>"/"<>ghRepo<>".git"
 
-  resolveAttrs (Git (GitSpec { gitUrl, gitRef })) = do
+  resolveAttrs (Git (GitSpec { gitUrl, gitRef, gitCommon })) = do
     (ref, commit) <- resolveGit gitUrl gitRef
-    addGitDigest ref commit [("url", gitUrl), ("rev", asString commit)]
+    addGitDigest ref commit gitCommon [("url", S gitUrl), ("rev", S $ asString commit)]
 
   resolveAttrs (Url (UrlSpec { url })) = do
     renderedUrl <- liftEither $ render url
-    addDigest [renderedUrl] [("url", renderedUrl)]
+    addDigest [renderedUrl] [("url", S renderedUrl)]
 
   -- *Local require no prefetching:
-  resolveAttrs (GitLocal (GitLocalSpec { glPath, glRef })) = do
+  resolveAttrs (GitLocal (GitLocalSpec { glPath, glRef, glCommon })) = do
     ref <- liftEither $ sequence $ render <$> glRef
-    return $ optList (refAttr <$> ref) <> toStringPairs glPath
+    return $ optList (refAttr <$> ref) <> toStringPairs glPath <> gitCommonAttrs glCommon
     where
-      refAttr ref = ("ref", ref)
+      refAttr ref = ("ref", S ref)
 
   resolveAttrs (Path p) = do
     return $ toStringPairs p
@@ -160,7 +167,7 @@ resolveGitRef remote refName = do
 shaLen = 52
 dummySHA256 = concat $ replicate shaLen "0"
 
-nixBuildCommand :: NixApiContext -> FetchType -> [(String,String)] -> NonEmpty String
+nixBuildCommand :: NixApiContext -> FetchType -> [FetchKV] -> NonEmpty String
 nixBuildCommand (NixApiContext { apiNix, projectRoot }) fetchType attrs
   = exe :| args
   where
@@ -198,10 +205,10 @@ globalApiContext = do
 -- This supports arbitrary prefetching without worrying about nix-prefetch-*.
 -- It's slightly inefficient since it results in two downloads of a file,
 -- but it's very reliable regardless of fetch method.
-prefetchSha256 :: FetchType -> [(String,String)] -> IO Sha256
+prefetchSha256 :: FetchType -> [FetchKV] -> IO Sha256
 prefetchSha256 fetchType attrs = do
   apiContext <- globalApiContext
-  let cmd = nixBuildCommand apiContext fetchType $ ("sha256", dummySHA256) : attrs
+  let cmd = nixBuildCommand apiContext fetchType $ ("sha256", S dummySHA256) : attrs
   debugLn $ "+ " <> (show $ NonEmpty.toList cmd)
   errText <- runProcessOutput Stderr (processSpec cmd)
   sequence_ $ map debugLn $ lines errText

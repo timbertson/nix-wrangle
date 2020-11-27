@@ -18,7 +18,7 @@ import Control.Monad.Except (throwError)
 import Control.Monad.Catch (throwM)
 import Control.Monad.State
 import Data.Char (toUpper)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isJust)
 import Data.List (partition, intercalate, intersperse)
 import Data.List.NonEmpty (NonEmpty(..))
 import System.Exit (exitFailure)
@@ -143,10 +143,33 @@ consumeAttrT key = StateT consume where
 
 defaultGitRef = "master"
 
-data ParsedAttrs = ParsedAttrs (Maybe Source.PackageName -> StringMap)
+data ParsedAttrs = ParsedAttrs StringMap
 
-extractAttrs :: Maybe Source.PackageName -> ParsedAttrs -> StringMap
-extractAttrs nameOpt (ParsedAttrs fn) = fn nameOpt
+instance Show ParsedAttrs where
+  show (ParsedAttrs attrs) = show attrs
+
+isEmptyAttrs :: ParsedAttrs -> Bool
+isEmptyAttrs (ParsedAttrs attrs) = HMap.empty == attrs
+
+extractAttrs :: PackageAttrsMode -> Maybe Source.PackageName -> ParsedAttrs -> StringMap
+extractAttrs mode nameOpt (ParsedAttrs attrs) = canonicalizeNix withDefaultNix where
+    withDefaultNix = case mode of
+      PackageAttrsForAdd -> addDefaultNix nameOpt attrs
+      _ -> attrs
+
+    -- drop nix attribute it if it's explicitly `"false"`
+    canonicalizeNix attrs = case HMap.lookup key attrs of
+      Just "false" -> HMap.delete key attrs
+      _ -> attrs
+      where key = "nix"
+
+    -- add default nix attribute, unless it's the `self` package
+    addDefaultNix nameOpt attrs = case (nameOpt, HMap.lookup key attrs) of
+      (Just (Source.PackageName "self"), Nothing) -> attrs
+      (_, Just _) -> attrs
+      (_, Nothing) -> HMap.insert key defaultDepNixPath attrs
+      where key = "nix"
+
 
 processAdd :: Maybe PackageName -> Maybe String -> ParsedAttrs -> Either AppError (Maybe PackageName, Source.PackageSpec)
 processAdd nameOpt source attrs = mapLeft AppError $ build nameOpt source attrs
@@ -154,7 +177,7 @@ processAdd nameOpt source attrs = mapLeft AppError $ build nameOpt source attrs
     build :: Maybe PackageName -> Maybe String -> ParsedAttrs -> Either String (Maybe PackageName, Source.PackageSpec)
     build nameOpt source parsedAttrs = evalStateT
       (build' nameOpt source)
-      (extractAttrs nameOpt parsedAttrs)
+      (extractAttrs PackageAttrsForAdd nameOpt parsedAttrs)
 
     build' :: Maybe PackageName -> Maybe String -> StringMapState (Maybe PackageName, Source.PackageSpec)
     build' nameOpt sourceOpt = typ >>= \case
@@ -279,7 +302,7 @@ parseAdd :: Opts.Parser (Either AppError (PackageName, Source.PackageSpec))
 parseAdd = build
     <$> Opts.optional parseName
     <*> Opts.optional parseSource
-    <*> parsePackageAttrs ParsePackageAttrsAdd
+    <*> parsePackageAttrs PackageAttrsForAdd
   where
     parseSource = Opts.argument Opts.str (Opts.metavar "SOURCE")
     build :: Maybe PackageName -> Maybe String -> ParsedAttrs -> Either AppError (PackageName, Source.PackageSpec)
@@ -288,29 +311,10 @@ parseAdd = build
       name <- toRight (AppError "--name required") name
       return (name, package)
 
-data ParsePackageAttrsMode = ParsePackageAttrsAdd | ParsePackageAttrsUpdate | ParsePackageAttrsSplice
+data PackageAttrsMode = PackageAttrsForAdd | PackageAttrsForUpdate | PackageAttrsForSlice
 
-parsePackageAttrs :: ParsePackageAttrsMode -> Opts.Parser ParsedAttrs
-parsePackageAttrs mode = build <$> many parseAttribute where
-  build attrPairs = ParsedAttrs (extractor (HMap.fromList attrPairs)) where
-    extractor :: StringMap -> (Maybe Source.PackageName) -> StringMap
-    extractor attrs nameOpt = canonicalizeNix $ case mode of
-      ParsePackageAttrsAdd -> addDefaultNix nameOpt attrs
-      _ -> attrs
-
-    -- drop nix attribute it if it's explicitly `"false"`
-    canonicalizeNix attrs = case HMap.lookup key attrs of
-      Just "false" -> HMap.delete key attrs
-      _ -> attrs
-      where key = "nix"
-
-    -- add default nix attribute, unless it's the `self` package
-    addDefaultNix nameOpt attrs = case (nameOpt, HMap.lookup key attrs) of
-      (Just (Source.PackageName "self"), Nothing) -> attrs
-      (_, Just _) -> attrs
-      (_, Nothing) -> HMap.insert key defaultDepNixPath attrs
-      where key = "nix"
-
+parsePackageAttrs :: PackageAttrsMode -> Opts.Parser ParsedAttrs
+parsePackageAttrs mode = ParsedAttrs . HMap.fromList <$> many parseAttribute where
   parseAttribute :: Opts.Parser (String, String)
   parseAttribute =
     Opts.option (Opts.maybeReader parseKeyVal)
@@ -337,9 +341,9 @@ parsePackageAttrs mode = build <$> many parseAttribute where
   shortcutAttributes = foldr (<|>) empty $ mkShortcutAttribute <$> shortcuts
     where
     shortcuts = case mode of
-      ParsePackageAttrsAdd -> allShortcuts
-      ParsePackageAttrsUpdate -> allShortcuts
-      ParsePackageAttrsSplice -> sourceShortcuts
+      PackageAttrsForAdd -> allShortcuts
+      PackageAttrsForUpdate -> allShortcuts
+      PackageAttrsForSlice -> sourceShortcuts
     allShortcuts = ("nix", "all") : sourceShortcuts
     sourceShortcuts = [
       ("ref", "github / git / git-local"),
@@ -558,7 +562,7 @@ cmdRm maybeNames opts = do
 -------------------------------------------------------------------------------
 parseCmdUpdate :: Opts.ParserInfo (IO ())
 parseCmdUpdate = subcommand "Update one or more sources"
-  (cmdUpdate <$> parseNames <*> parsePackageAttrs ParsePackageAttrsUpdate <*> parseCommon)
+  (cmdUpdate <$> parseNames <*> parsePackageAttrs PackageAttrsForUpdate <*> parseCommon)
   [ examplesDoc [
     "nix-wrangle update pkgs --ref nixpkgs-unstable",
     "nix-wrangle update gup --nix nix/"
@@ -566,13 +570,20 @@ parseCmdUpdate = subcommand "Update one or more sources"
 
 cmdUpdate :: Maybe (NonEmpty PackageName) -> ParsedAttrs -> CommonOpts -> IO ()
 cmdUpdate packageNamesOpt parsedAttrs opts =
-  alterPackagesNamed packageNamesOpt opts updateSingle where
+  -- Update must either specify no attributes (update everything to latest version)
+  -- or specify one or more explicit package names
+  if isJust packageNamesOpt || isEmptyAttrs parsedAttrs
+    then alterPackagesNamed packageNamesOpt opts updateSingle
+    else throwM $ AppError (
+      "You must explicitly list dependency names when modifying attributes (" <> show parsedAttrs <> ")"
+    ) where
+
   updateSingle :: Source.Packages -> PackageName -> IO Source.Packages
   updateSingle packages name = do
     infoLn $ " - updating " <> (show name) <> "..."
     original <- liftEither $ Source.lookup name packages
     debugLn $ "original: " <> show original
-    let updateAttrs = extractAttrs (Just name) parsedAttrs
+    let updateAttrs = extractAttrs PackageAttrsForUpdate (Just name) parsedAttrs
     debugLn $ "updateAttrs: " <> show updateAttrs
     newSpec <- liftEither $ Source.updatePackageSpec original updateAttrs
     fetched <- Fetch.prefetch name newSpec

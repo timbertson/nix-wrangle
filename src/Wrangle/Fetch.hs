@@ -33,7 +33,7 @@ prefetch name pkg = do
   return $ pkg { fetchAttrs = fetchAttrs }
   where
 
-  digestKey = "sha256"
+  digestKey = "hash"
   existing key = AMap.lookup key (fetchAttrs pkg)
   src = sourceSpec pkg
   render = renderTemplate (packageAttrs pkg)
@@ -44,7 +44,7 @@ prefetch name pkg = do
     _ -> addDigest path attrs
 
   addDigest :: [String] -> [Kv] -> IO [Kv]
-  addDigest path attrs = prefix <$> (log $ prefetchSha256 (fetchType src) attrs) where
+  addDigest path attrs = prefix <$> (log $ prefetchSriHash (fetchType src) attrs) where
     prefix d = (digestKey, S (asString d)) : attrs
     log = tap (\d -> do
       infoLn $ "Resolved " <> (intercalate " -> " (asString name : path))
@@ -165,8 +165,7 @@ resolveGitRef remote refName = do
       matches :: String -> ResolvedRef -> Bool
       matches candidate = ((==) candidate) . ref
 
-shaLen = 52
-dummySHA256 = concat $ replicate shaLen "0"
+dummyHash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
 nixBuildCommand :: NixApiContext -> FetchType -> [Kv] -> NonEmpty String
 nixBuildCommand (NixApiContext { apiNix, projectRoot }) fetchType attrs
@@ -206,10 +205,10 @@ globalApiContext = do
 -- This supports arbitrary prefetching without worrying about nix-prefetch-*.
 -- It's slightly inefficient since it results in two downloads of a file,
 -- but it's very reliable regardless of fetch method.
-prefetchSha256 :: FetchType -> [Kv] -> IO Sha256
-prefetchSha256 fetchType attrs = do
+prefetchSriHash :: FetchType -> [Kv] -> IO SriHash
+prefetchSriHash fetchType attrs = do
   apiContext <- globalApiContext
-  let cmd = nixBuildCommand apiContext fetchType $ ("sha256", S dummySHA256) : attrs
+  let cmd = nixBuildCommand apiContext fetchType $ ("hash", S dummyHash) : attrs
   debugLn $ "+ " <> (show $ NonEmpty.toList cmd)
   errText <- runProcessOutput Stderr (processSpec cmd)
   sequence_ $ map debugLn $ lines errText
@@ -223,22 +222,14 @@ prefetchSha256 fetchType attrs = do
 -- Thanks https://github.com/seppeljordan/nix-prefetch-github/blob/cd9708fcdf033874451a879ac5fe68d7df930b7e/src/nix_prefetch_github/__init__.py#L124
 -- For the future, note SRI: https://github.com/NixOS/nix/commit/6024dc1d97212130c19d3ff5ce6b1d102837eee6
 -- and https://github.com/NixOS/nix/commit/5e6fa9092fb5be722f3568c687524416bc746423
-extractExpectedDigest :: String -> Either AppError Sha256
-extractExpectedDigest output = Sha256 <$> (
-  (singleResult $ subMatches nix_1_x) `orTry`
-  (singleResult $ subMatches nix_2_0) `orTry`
-  (singleResult $ subMatches nix_2_2) `orTry`
-  (singleResult $ filter (/= dummySHA256) $ subMatches fallback))
+extractExpectedDigest :: String -> Either AppError SriHash
+extractExpectedDigest output = SriHash <$> (
+  (singleResult $ subMatches nix_sri))
   where
   subMatches :: String -> [String]
   subMatches pat = concat $ drop 1 <$> ((output =~ pat) :: [[String]])
 
-  shaRe = "([a-z0-9]{"<> (show shaLen) <>"})"
-
-  nix_1_x = "output path .* has .* hash '"<>shaRe<>"' when .*"
-  nix_2_0 = "fixed-output derivation produced path .* with sha256 hash '"<>shaRe<>"' instead of the expected hash .*"
-  nix_2_2 = "  got: +sha256:"<>shaRe
-  fallback = shaRe
+  nix_sri = "  got: +(sha256-[^\n]+)"
 
   singleResult [result] = Right result
   singleResult _ = Left . AppError $ "Unable to detect resulting digest from nix-build output:\n\n" <> output

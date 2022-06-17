@@ -18,7 +18,8 @@ import System.FilePath.Posix ((</>), takeDirectory)
 import Wrangle.Util
 import Wrangle.Source
 import qualified System.IO.Strict as H
-import qualified Data.HashMap.Strict as HMap
+import qualified Data.Aeson.KeyMap as AMap
+import qualified Data.Aeson.Key as Key
 import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.Text as T
 import qualified System.Process as P
@@ -27,13 +28,13 @@ import qualified System.Directory as Dir
 prefetch :: PackageName -> PackageSpec -> IO PackageSpec
 prefetch name pkg = do
   infoLn $ "fetching " <> (show src)
-  fetchAttrs <- HMap.fromList <$> resolveAttrs src
+  fetchAttrs <- AMap.fromList <$> resolveAttrs src
   debugLn $ "Prefetch results: " <> show fetchAttrs
   return $ pkg { fetchAttrs = fetchAttrs }
   where
 
   digestKey = "sha256"
-  existing key = HMap.lookup key (fetchAttrs pkg)
+  existing key = AMap.lookup key (fetchAttrs pkg)
   src = sourceSpec pkg
   render = renderTemplate (packageAttrs pkg)
 
@@ -47,7 +48,7 @@ prefetch name pkg = do
     prefix d = (digestKey, S (asString d)) : attrs
     log = tap (\d -> do
       infoLn $ "Resolved " <> (intercalate " -> " (asString name : path))
-      infoLn $ " - "<>digestKey<>":" <> asString d)
+      infoLn $ " - "<>(Key.toString digestKey)<>":" <> asString d)
 
   gitCommonAttrs :: GitCommon -> [Kv]
   gitCommonAttrs common = if fetchSubmodules common
@@ -172,7 +173,7 @@ nixBuildCommand (NixApiContext { apiNix, projectRoot }) fetchType attrs
   = exe :| args
   where
     fetcherName = fetcherNameWrangle fetchType
-    fetchJSON = encodeOnelineString . toJSON . HMap.fromList $ attrs
+    fetchJSON = encodeOnelineString . toJSON . AMap.fromList $ attrs
     fetchExpr = intercalate "\n" [
       "{fetchJSON, apiPath, path}:",
       "let api = (import <nixpkgs> {}).callPackage apiPath {}; in",
@@ -250,7 +251,7 @@ renderTemplate attrs fullText = render (asString fullText) where
         (key, '>':rest) ->
           liftA2 (<>) value (render rest)
           where
-            value = toRight notFound $ HMap.lookup key attrs
+            value = toRight notFound $ AMap.lookup (Key.fromString key) attrs
             notFound = AppError $ "Missing key `"<> key <>"` in template: " <> (asString fullText)
         _ -> throwError . AppError $ "Value contains an unterminated key: " <> (asString fullText)
   render (c:str) = (c:) <$> render str

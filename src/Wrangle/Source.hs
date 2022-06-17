@@ -25,6 +25,8 @@ import qualified Data.Aeson.Encode.Pretty as AesonPretty
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as L
 import qualified Data.HashMap.Strict as HMap
+import qualified Data.Aeson.KeyMap as AMap
+import qualified Data.Aeson.Key as Key
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as E
 import qualified Data.Text.Lazy as TL
@@ -48,28 +50,28 @@ instance Show StringOrBool where
   show (S x) = show x
   show (B x) = show x
 
-type Kv = (String, StringOrBool)
+type Kv = (Key, StringOrBool)
 
-type StringMap = HMap.HashMap String String
+type StringMap = AMap.KeyMap String
 
-type KvMap = HMap.HashMap String StringOrBool
+type KvMap = AMap.KeyMap StringOrBool
 
-fetchKeyJSON = "fetch" :: T.Text
-typeKeyJSON = "type" :: T.Text
-versionKeyJSON = "version" :: T.Text
-sourcesKeyJSON = "sources" :: T.Text
-wrangleKeyJSON = "wrangle" :: T.Text
-apiversionKeyJSON = "apiversion" :: T.Text
-fetchSubmodulesKeyJSON = "fetchSubmodules" :: String
+fetchKeyJSON = "fetch" :: Key
+typeKeyJSON = "type" :: Key
+versionKeyJSON = "version" :: Key
+sourcesKeyJSON = "sources" :: Key
+wrangleKeyJSON = "wrangle" :: Key
+apiversionKeyJSON = "apiversion" :: Key
+fetchSubmodulesKeyJSON = "fetchSubmodules" :: Key
 
 wrangleHeaderJSON :: Aeson.Value
 wrangleHeaderJSON =
-  Object $ HMap.singleton apiversionKeyJSON (toJSON latestApiVersion)
+  Object $ AMap.singleton apiversionKeyJSON (toJSON latestApiVersion)
 
 class ToKvPairs t where
   toKvPairs :: t -> [Kv]
   toKvMap :: t -> KvMap
-  toKvMap = HMap.fromList . toKvPairs
+  toKvMap = AMap.fromList . toKvPairs
 
 class AsString t where
   asString :: t -> String
@@ -86,8 +88,13 @@ instance AsString GitRevision where
 
 newtype Sha256 = Sha256 String deriving (Show, Eq, FromJSON, ToJSON)
 
+newtype SriHash = SriHash String deriving (Show, Eq, FromJSON, ToJSON)
+
 instance AsString Sha256 where
   asString (Sha256 s) = s
+
+instance AsString SriHash where
+  asString (SriHash s) = s
 
 data GitCommon = GitCommon {
   fetchSubmodules :: Bool
@@ -277,7 +284,7 @@ parseSourceSpecObject fetcher attrs = parseFetcher fetcher >>= parseSpec
 
     fetchSubmodulesOpt :: Parser Bool
     fetchSubmodulesOpt = do
-      (strOpt :: Maybe String) <- attrs .:? (T.pack fetchSubmodulesKeyJSON)
+      (strOpt :: Maybe String) <- attrs .:? fetchSubmodulesKeyJSON
       (boolOpt :: Maybe Bool) <- traverse parseBoolFromString strOpt
       return $ maybe (fetchSubmodules defaultGitCommon) id boolOpt
 
@@ -300,7 +307,7 @@ instance FromJSON PackageSpec where
       <*> fetchAttrs <*> packageAttrs
     ) where
     extract obj key = pairWithout key obj <$> obj .: key
-    pairWithout key obj v = (v, HMap.delete key obj)
+    pairWithout key obj v = (v, AMap.delete key obj)
     build sourceSpec fetchAttrs packageAttrs = PackageSpec {
       sourceSpec, fetchAttrs, packageAttrs
     }
@@ -308,9 +315,9 @@ instance FromJSON PackageSpec where
 instance ToJSON PackageSpec where
   toJSON PackageSpec { sourceSpec, fetchAttrs, packageAttrs } =
     toJSON
-      . HMap.insert (T.unpack typeKeyJSON) (toJSON . fetcherNameWrangle . fetchType $ sourceSpec)
-      . HMap.insert (T.unpack fetchKeyJSON) (toJSON fetchAttrs)
-      $ (HMap.map toJSON (HMap.map S packageAttrs <> toKvMap sourceSpec))
+      . AMap.insert typeKeyJSON (toJSON . fetcherNameWrangle . fetchType $ sourceSpec)
+      . AMap.insert fetchKeyJSON (toJSON fetchAttrs)
+      $ (AMap.map toJSON (AMap.map S packageAttrs <> (toKvMap sourceSpec)))
 
 newtype Packages = Packages
   { unPackages :: HMap.HashMap PackageName PackageSpec }
@@ -329,9 +336,9 @@ instance FromJSON Packages where
     (obj .: wrangleKeyJSON >>= checkHeader) >>
     Packages <$> (obj .: sourcesKeyJSON >>= withObject "sources" parsePackageSpecs)
     where
-      parsePackageSpecs attrs = HMap.fromList <$> mapM parseItem (HMap.toList attrs)
-      parseItem :: (T.Text, Value) -> Parser (PackageName, PackageSpec)
-      parseItem (k,v) = (PackageName $ T.unpack k,) <$> parseJSON v
+      parsePackageSpecs attrs = HMap.fromList <$> mapM parseItem (AMap.toList attrs)
+      parseItem :: (Key, Value) -> Parser (PackageName, PackageSpec)
+      parseItem (k,v) = (PackageName $ Key.toString k,) <$> parseJSON v
       checkHeader = withObject "Wrangle Header" $ \obj ->
         (obj .: apiversionKeyJSON >>= checkApiVersion)
       checkApiVersion v =
@@ -356,7 +363,7 @@ updatePackageSpec original attrs = mergedJSON >>= liftResult <$> fromJSON where
   -- Going via JSON is a little hacky, but
   -- we've already got a nice to/from JSON code path
   mergedJSON = case (toJSON original, toJSON attrs) of
-    (Object orig, Object add) -> Right $ Object $ HMap.union add orig
+    (Object orig, Object add) -> Right $ Object $ AMap.union add orig
     (_, _) -> Left $ "Expected JSON object" -- should be impossible
 
 loadSourceFile :: SourceFile -> IO Packages

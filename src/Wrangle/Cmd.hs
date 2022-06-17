@@ -24,8 +24,11 @@ import Data.List.NonEmpty (NonEmpty(..))
 import System.Exit (exitFailure)
 import Wrangle.Source (PackageName(..), StringMap, asString)
 import Wrangle.Util
+import Data.Aeson.Key (Key)
 import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.HashMap.Strict as HMap
+import qualified Data.Aeson.KeyMap as AMap
+import qualified Data.Aeson.Key as Key
 import qualified Data.String.QQ as QQ
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
@@ -113,29 +116,29 @@ parseNames = NonEmpty.nonEmpty <$> many parseName
 
 (|>) a fn = fn a
 
-lookupAttr :: String -> StringMap -> (Maybe String, StringMap)
-lookupAttr key map = (HMap.lookup key map, map)
+lookupAttr :: Key -> StringMap -> (Maybe String, StringMap)
+lookupAttr key map = (AMap.lookup key map, map)
 
-consumeAttr :: String -> StringMap -> (Maybe String, StringMap)
-consumeAttr key map = (HMap.lookup key map, HMap.delete key map)
+consumeAttr :: Key -> StringMap -> (Maybe String, StringMap)
+consumeAttr key map = (AMap.lookup key map, AMap.delete key map)
 
-attrRequired :: String -> String
-attrRequired key = "--"<> key <> " required"
+attrRequired :: Key -> String
+attrRequired key = "--"<> (Key.toString key) <> " required"
 
-consumeRequiredAttr :: String -> StringMap -> (Either String String, StringMap)
+consumeRequiredAttr :: Key -> StringMap -> (Either String String, StringMap)
 consumeRequiredAttr key map = require $ consumeAttr key map where
   -- this error message is a little presumptuous...
   require (value, map) = (toRight (attrRequired key) value, map)
 
 type StringMapState a = StateT StringMap (Either String) a
 
-consumeOptionalAttrT :: String -> StringMapState (Maybe String)
+consumeOptionalAttrT :: Key -> StringMapState (Maybe String)
 consumeOptionalAttrT key = state $ consumeAttr key
 
-lookupOptionalAttrT :: String -> StringMapState (Maybe String)
+lookupOptionalAttrT :: Key -> StringMapState (Maybe String)
 lookupOptionalAttrT key = state $ lookupAttr key
 
-consumeAttrT :: String -> StringMapState String
+consumeAttrT :: Key -> StringMapState String
 consumeAttrT key = StateT consume where
   consume :: StringMap -> Either String (String, StringMap)
   consume = reshape . consumeRequiredAttr key
@@ -174,8 +177,8 @@ processAdd nameOpt source attrs = mapLeft AppError $ build nameOpt source attrs
     packageSpec sourceSpec = state $ \attrs -> (Source.PackageSpec {
       Source.sourceSpec,
       Source.packageAttrs = attrs,
-      Source.fetchAttrs = HMap.empty
-    }, HMap.empty)
+      Source.fetchAttrs = AMap.empty
+    }, AMap.empty)
 
     buildPathOpt :: StringMapState (Maybe Source.LocalPath)
     buildPathOpt = fmap pathOfString <$> consumeOptionalAttrT "path" where
@@ -292,26 +295,26 @@ data ParsePackageAttrsMode = ParsePackageAttrsAdd | ParsePackageAttrsUpdate | Pa
 
 parsePackageAttrs :: ParsePackageAttrsMode -> Opts.Parser ParsedAttrs
 parsePackageAttrs mode = build <$> many parseAttribute where
-  build attrPairs = ParsedAttrs (extractor (HMap.fromList attrPairs)) where
+  build attrPairs = ParsedAttrs (extractor (AMap.fromList attrPairs)) where
     extractor :: StringMap -> (Maybe Source.PackageName) -> StringMap
     extractor attrs nameOpt = canonicalizeNix $ case mode of
       ParsePackageAttrsAdd -> addDefaultNix nameOpt attrs
       _ -> attrs
 
     -- drop nix attribute it if it's explicitly `"false"`
-    canonicalizeNix attrs = case HMap.lookup key attrs of
-      Just "false" -> HMap.delete key attrs
+    canonicalizeNix attrs = case AMap.lookup key attrs of
+      Just "false" -> AMap.delete key attrs
       _ -> attrs
       where key = "nix"
 
     -- add default nix attribute, unless it's the `self` package
-    addDefaultNix nameOpt attrs = case (nameOpt, HMap.lookup key attrs) of
+    addDefaultNix nameOpt attrs = case (nameOpt, AMap.lookup key attrs) of
       (Just (Source.PackageName "self"), Nothing) -> attrs
       (_, Just _) -> attrs
-      (_, Nothing) -> HMap.insert key defaultDepNixPath attrs
+      (_, Nothing) -> AMap.insert key defaultDepNixPath attrs
       where key = "nix"
 
-  parseAttribute :: Opts.Parser (String, String)
+  parseAttribute :: Opts.Parser (Key, String)
   parseAttribute =
     Opts.option (Opts.maybeReader parseKeyVal)
       ( Opts.long "attr" <>
@@ -327,13 +330,13 @@ parsePackageAttrs mode = build <$> many parseAttribute where
       ))
 
   -- Parse "key=val" into ("key", "val")
-  parseKeyVal :: String -> Maybe (String, String)
+  parseKeyVal :: String -> Maybe (Key, String)
   parseKeyVal str = case span (/= '=') str of
-    (key, '=':val) -> Just (key, val)
+    (key, '=':val) -> Just (Key.fromString key, val)
     _ -> Nothing
 
   -- Shortcuts for known attributes
-  shortcutAttributes :: Opts.Parser (String, String)
+  shortcutAttributes :: Opts.Parser (Key, String)
   shortcutAttributes = foldr (<|>) empty $ mkShortcutAttribute <$> shortcuts
     where
     shortcuts = case mode of
@@ -350,9 +353,9 @@ parsePackageAttrs mode = build <$> many parseAttribute where
       ("path", "git-local"),
       ("version", "all")]
 
-  mkShortcutAttribute :: (String, String) -> Opts.Parser (String, String)
+  mkShortcutAttribute :: (String, String) -> Opts.Parser (Key, String)
   mkShortcutAttribute (attr, types) =
-    (attr,) <$> Opts.strOption
+    (Key.fromString attr,) <$> Opts.strOption
       ( Opts.long attr <>
         Opts.metavar (toUpper <$> attr) <>
         Opts.help
@@ -434,8 +437,8 @@ cmdInit nixpkgs = do
         Source.ghCommon = Source.defaultGitCommon,
         Source.ghRef = Source.Template "v1"
       },
-      Source.fetchAttrs = HMap.empty,
-      Source.packageAttrs = HMap.fromList [("nix", "nix")]
+      Source.fetchAttrs = AMap.empty,
+      Source.packageAttrs = AMap.fromList [("nix", "nix")]
     })
     nixpkgsSpecs = case nixpkgs of
       Nothing -> []
@@ -446,8 +449,8 @@ cmdInit nixpkgs = do
         Source.ghCommon = Source.defaultGitCommon,
         Source.ghRef = Source.Template channel
       },
-      Source.fetchAttrs = HMap.empty,
-      Source.packageAttrs = HMap.fromList [("nix", defaultDepNixPath)]
+      Source.fetchAttrs = AMap.empty,
+      Source.packageAttrs = AMap.fromList [("nix", defaultDepNixPath)]
     })]
 
     selfSpecs isGit =
@@ -458,8 +461,8 @@ cmdInit nixpkgs = do
             Source.glRef = Nothing,
             Source.glCommon = Source.defaultGitCommon
           },
-          Source.fetchAttrs = HMap.empty,
-          Source.packageAttrs = HMap.empty
+          Source.fetchAttrs = AMap.empty,
+          Source.packageAttrs = AMap.empty
         })
       ] else []
 

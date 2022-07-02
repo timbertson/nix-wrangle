@@ -115,6 +115,7 @@ validTypesDoc = "Valid types: " <> (intercalate "|" $ map fetcherNameWrangle all
 parseFetchType :: String -> Either String FetchType
 parseFetchType s = case s of
   "github" -> Right FetchGithub
+  "git" -> Right FetchGit
   "url" -> Right $ FetchUrl FetchArchive
   "file" -> Right $ FetchUrl FetchFile
   "path" -> Right FetchPath

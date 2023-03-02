@@ -1,5 +1,7 @@
 <!-- NOTE: README.md is generated from README.md.gup, do not manually edit -->
-# nix-wrangle
+# nix-wrangle is deprecated
+
+`nix-wrangle` is featureful but somewhat complex to use and maintain. I've decided to use the more basic [niv](https://github.com/nmattia/niv) myself rather than maintaining nix-wrangle, I suggest others do the same.
 
 ## Purpose:
 
